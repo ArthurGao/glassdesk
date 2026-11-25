@@ -1,9 +1,7 @@
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 
-import pytest
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
 from lite_agent.pg import PgSessionStore
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -11,46 +9,7 @@ from glassdesk.app import create_app
 from glassdesk.config import Settings
 from glassdesk.db import Deps
 from glassdesk.testing import FakeSteward
-from glassdesk.users import create_user
-from tests.conftest import TEST_AGENT_SCHEMA, _test_url
-from tests.helpers import P1, BlockingModel, login, parse_sse, search_then_answer
-
-
-@pytest.fixture
-async def sessions() -> AsyncIterator[PgSessionStore]:
-    store = PgSessionStore(_test_url().replace("+psycopg", ""), schema=TEST_AGENT_SCHEMA)
-    yield store
-    await store.close()
-
-
-@pytest.fixture
-def make_app(
-    settings: Settings, engine: AsyncEngine, sessions: PgSessionStore
-) -> Callable[..., FastAPI]:
-    def make(model: object, steward: FakeSteward | None = None) -> FastAPI:
-        deps = Deps(
-            engine=engine,
-            model=model,
-            sessions=sessions,  # type: ignore[arg-type]
-            steward=steward or FakeSteward([P1]),
-        )
-        return create_app(settings, deps=deps)
-
-    return make
-
-
-async def client_for(app: FastAPI, engine: AsyncEngine, username: str) -> AsyncClient:
-    await create_user(engine, username, "pw", "member")
-    client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-    await login(client, username)
-    return client
-
-
-async def ask(client: AsyncClient, text: str = "报销上限是多少？") -> tuple[str, str]:
-    conv = (await client.post("/api/conversations")).json()
-    response = await client.post(f"/api/conversations/{conv['id']}/messages", json={"text": text})
-    assert response.status_code == 202
-    return conv["id"], response.json()["run_id"]
+from tests.helpers import P1, BlockingModel, ask, client_for, parse_sse, search_then_answer
 
 
 async def test_ask_streams_steps_then_answer(

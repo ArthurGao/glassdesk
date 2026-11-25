@@ -1,6 +1,7 @@
 """Conversations, asking a question, and following the agent's steps (design §4, §6)."""
 
 import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict
@@ -22,8 +23,11 @@ from glassdesk.auth import CurrentUser
 from glassdesk.db import Deps
 from glassdesk.runs import Busy, Runs
 from glassdesk.steward import Passage
+from glassdesk.suggestions import open_cards
 from glassdesk.timeline import Answer, Step, changes, project_answer, steps_after
 from glassdesk.users import metadata
+
+log = logging.getLogger(__name__)
 
 POLL_S = 0.25
 NEW_TITLE = "新会话"
@@ -232,7 +236,7 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             on_passages=keep,
             first_n=first_n,
         )
-        sessions = deps.sessions
+        sessions, steward = deps.sessions, deps.steward
 
         async def work() -> None:
             # From whether the session exists, not from the stored id: a first run that died
@@ -249,6 +253,17 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             # failures may not have written it.
             if result.error is not None and result.error.kind != "model":
                 runs.failed[conv.id] = run_id
+                return
+            if result.text:
+                # steward decides what is worth keeping; a failure here never touches the answer
+                try:
+                    await steward.report_episode(
+                        [("user", body.text), ("assistant", result.text)],
+                        user_id=str(user.id),
+                        session_id=session_id,
+                    )
+                except Exception:
+                    log.warning("reporting the episode of run %s failed", run_id, exc_info=True)
 
         runs.start(conv.id, work)
     except BaseException:
@@ -304,4 +319,12 @@ async def stream(
         answers = await _answers(deps.engine, conv.id, events, last_only=True)
         if answers:
             yield ServerSentEvent(data=answers[0], event="answer")
+        if deps.steward is not None:
+            try:
+                cards = await open_cards(deps.steward, str(conv.user_id))
+            except Exception:
+                log.warning("listing cards failed", exc_info=True)
+                cards = []
+            if cards:
+                yield ServerSentEvent(data=cards, event="suggestions")
     yield ServerSentEvent(data={}, event="end")

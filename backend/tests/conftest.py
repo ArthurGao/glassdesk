@@ -2,16 +2,21 @@
 schemas TEST_SCHEMA and TEST_AGENT_SCHEMA, which every test drops and recreates. The app's Settings
 refuse *_test schema names, so no app process can hold data in a schema the tests drop."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import pytest
+from fastapi import FastAPI
+from lite_agent.pg import PgSessionStore
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from glassdesk.app import create_app
 from glassdesk.config import Settings
 from glassdesk.db import Deps, make_engine, run_migrations
+from glassdesk.testing import FakeSteward
+from tests.helpers import P1
 
 TEST_SCHEMA = "glassdesk_test"
 TEST_AGENT_SCHEMA = "lite_agent_test"
@@ -55,3 +60,26 @@ async def engine() -> AsyncIterator[AsyncEngine]:
 @pytest.fixture
 def deps(engine: AsyncEngine) -> Deps:
     return Deps(engine=engine)
+
+
+@pytest.fixture
+async def sessions() -> AsyncIterator[PgSessionStore]:
+    store = PgSessionStore(_test_url().replace("+psycopg", ""), schema=TEST_AGENT_SCHEMA)
+    yield store
+    await store.close()
+
+
+@pytest.fixture
+def make_app(
+    settings: Settings, engine: AsyncEngine, sessions: PgSessionStore
+) -> Callable[..., FastAPI]:
+    def make(model: object, steward: FakeSteward | None = None) -> FastAPI:
+        deps = Deps(
+            engine=engine,
+            model=model,
+            sessions=sessions,  # type: ignore[arg-type]
+            steward=steward or FakeSteward([P1]),
+        )
+        return create_app(settings, deps=deps)
+
+    return make

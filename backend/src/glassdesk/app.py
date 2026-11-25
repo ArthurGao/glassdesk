@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from lite_agent.pg import PgSessionStore
 from lite_model import RolePolicy, RoleSpec, build_async
 
-from glassdesk import auth, conversations
+from glassdesk import auth, conversations, suggestions
 from glassdesk.agent import ROLE
 from glassdesk.config import Settings
 from glassdesk.db import Deps, make_engine, sync_url
@@ -75,6 +75,7 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(conversations.router)
+    app.include_router(suggestions.router)
     if settings.static_dir is not None:
         _serve_spa(app, settings.static_dir)
     return app

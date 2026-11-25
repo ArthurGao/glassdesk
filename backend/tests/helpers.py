@@ -4,12 +4,15 @@ import asyncio
 import json
 from typing import Any
 
-from httpx import AsyncClient
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from lite_model import AssistantTurn, Text, ToolCall
 from lite_model.testing import AsyncFakeModel
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from glassdesk.agent import ROLE
 from glassdesk.steward import Passage
+from glassdesk.users import Role, create_user
 
 P1 = Passage(
     item_id="e1",
@@ -62,3 +65,19 @@ def parse_sse(body: str) -> list[tuple[str, str | None, Any]]:
 async def login(client: AsyncClient, username: str) -> None:
     response = await client.post("/api/auth/login", json={"username": username, "password": "pw"})
     assert response.status_code == 200
+
+
+async def client_for(
+    app: FastAPI, engine: AsyncEngine, username: str, role: Role = "member"
+) -> AsyncClient:
+    await create_user(engine, username, "pw", role)
+    client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    await login(client, username)
+    return client
+
+
+async def ask(client: AsyncClient, text: str = "报销上限是多少？") -> tuple[str, str]:
+    conv = (await client.post("/api/conversations")).json()
+    response = await client.post(f"/api/conversations/{conv['id']}/messages", json={"text": text})
+    assert response.status_code == 202
+    return conv["id"], response.json()["run_id"]
