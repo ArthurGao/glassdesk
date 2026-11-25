@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      GLASSDESK_TEST_DATABASE_URL: postgresql+psycopg://glassdesk:ci@localhost:5432/glassdesk
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.10.8"
+      - name: the test role (owner of its database, not a superuser)
+        env:
+          PGPASSWORD: ci
+        run: |
+          psql -h localhost -U postgres -c "CREATE ROLE glassdesk LOGIN PASSWORD 'ci'"
+          psql -h localhost -U postgres -c "CREATE DATABASE glassdesk OWNER glassdesk"
+      - run: uv sync --locked
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run mypy
+      - run: uv run pytest -v

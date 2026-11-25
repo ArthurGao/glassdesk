@@ -1,0 +1,65 @@
+[project]
+name = "glassdesk"
+version = "0.1.0"
+description = "A knowledge assistant whose every step is visible: lite-agent over llm-steward"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14",
+    "psycopg[binary,pool]>=3.2",
+    "argon2-cffi>=23.1",
+    "itsdangerous>=2.2",
+    "sse-starlette>=2.1",
+    # the agent loop and its PostgreSQL session store; it names its lite-model (0.8.0)
+    "lite-agent[pg]",
+    # llm-steward over HTTP only (never `llm_steward` itself, workspace rule)
+    "llm-steward-client",
+]
+
+[project.scripts]
+glassdesk = "glassdesk.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "httpx>=0.27",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.sources]
+lite-agent = { url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.2.4/lite_agent-0.2.4-py3-none-any.whl" }
+llm-steward-client = { git = "https://github.com/ArthurGao/llm-steward", rev = "e5cb7ba8e098f8c2554d38df677419544ca71d4a", subdirectory = "sdk/python" }
+
+[build-system]
+requires = ["uv_build>=0.10,<0.11"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "RUF"]
+# Full-width punctuation is intentional: Chinese prompts and UI copy.
+allowed-confusables = ["：", "（", "）", "！", "？", "，", "；"]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["glassdesk"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
