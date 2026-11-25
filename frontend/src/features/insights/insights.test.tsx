@@ -5,7 +5,7 @@ import { renderApp } from '@/test/render'
 import { server } from '@/test/server'
 
 function day(d: string, over: Partial<InsightsOut['totals']> = {}): InsightsOut['totals'] {
-  return { day: d, answers: 0, failed: 0, tokens: 0, cost_usd: null, cost_unknown_runs: 0, ...over }
+  return { day: d, answers: 0, failed: 0, tokens: 0, tokens_unknown_runs: 0, cost_usd: null, cost_unknown_runs: 0, ...over }
 }
 
 const BODY: InsightsOut = {
@@ -62,4 +62,20 @@ test('a member is told insights need the reviewer role', async () => {
   api('member', null)
   renderApp('/insights')
   expect(await screen.findByText('需要审核权限才能查看洞察。')).toBeInTheDocument()
+})
+
+test('tokens say how many runs reported none', async () => {
+  api('reviewer', { ...BODY, totals: day('2026-11-25', { answers: 2, tokens: 120, tokens_unknown_runs: 1 }) })
+  renderApp('/insights')
+  const tiles = await screen.findByRole('list', { name: '概览' })
+  expect(within(tiles).getByText('tokens').nextSibling).toHaveTextContent('120（1 次未知）')
+})
+
+test('an error says so instead of a blank page', async () => {
+  server.use(
+    http.get('*/api/me', () => HttpResponse.json({ username: 'rita', role: 'reviewer' })),
+    http.get('*/api/insights', () => HttpResponse.json({ detail: 'boom' }, { status: 500 })),
+  )
+  renderApp('/insights')
+  expect(await screen.findByRole('alert')).toHaveTextContent('洞察暂时无法加载')
 })

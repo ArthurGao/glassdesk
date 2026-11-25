@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { rateAnswer } from '@/client/sdk.gen'
 import type { Answer } from '@/client/types.gen'
 import { chatKeys } from './keys'
@@ -11,12 +12,14 @@ const CHOICES: Array<[boolean, string]> = [
 /** Helpful / not helpful under an answer; the latest choice wins and shows pressed. */
 export function AnswerFeedback({ conversationId, answer }: { conversationId: string; answer: Answer }) {
   const queryClient = useQueryClient()
+  const [saving, setSaving] = useState(false)
 
   async function rate(helpful: boolean) {
+    setSaving(true) // one rating at a time: a double click must not send two
     const { data } = await rateAnswer({
       path: { conversation_id: conversationId, run_id: answer.run_id },
       body: { helpful },
-    })
+    }).finally(() => setSaving(false))
     if (!data) return
     queryClient.setQueryData<Answer[]>(chatKeys.answers(conversationId), (prev = []) =>
       prev.map((a) => (a.run_id === answer.run_id ? { ...a, feedback: data.helpful } : a)),
@@ -31,6 +34,7 @@ export function AnswerFeedback({ conversationId, answer }: { conversationId: str
           key={label}
           type="button"
           aria-pressed={answer.feedback === helpful}
+          disabled={saving}
           onClick={() => rate(helpful)}
           className={button}
         >

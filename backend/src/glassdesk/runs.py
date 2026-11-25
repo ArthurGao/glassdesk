@@ -56,7 +56,10 @@ class Runs:
         """Only the run that holds the claim ends it: a later run's claim is left alone."""
         if self._claims.get(conversation_id) == run_id:
             del self._claims[conversation_id]
-            asyncio.get_running_loop().create_task(self._notify())
+            # kept until done: an unreferenced task may be collected before it runs
+            task = asyncio.get_running_loop().create_task(self._notify())
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
     async def _notify(self) -> None:
         async with self._released:

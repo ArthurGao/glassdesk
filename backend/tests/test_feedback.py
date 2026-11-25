@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from glassdesk.testing import FakeSteward
+from glassdesk.users import create_user
 from tests.helpers import P1, ask, client_for, search_then_answer
 
 
@@ -113,3 +114,40 @@ async def test_a_run_that_raises_is_counted_as_failed(
     async with engine.connect() as conn:
         rows = (await conn.execute(text("select run_id, failed from run_usage"))).all()
     assert [(r.run_id, r.failed) for r in rows] == [(run_id, True)]
+
+
+async def test_two_first_ratings_at_once_tell_steward_once(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    """A double click or two tabs: both requests find no earlier rating."""
+    import asyncio
+
+    steward = FakeSteward([P1])
+    client = await client_for(make_app(search_then_answer("800 元[1]"), steward), engine, "alice")
+    conv_id, run_id = await answered(client)
+    url = f"/api/conversations/{conv_id}/answers/{run_id}/feedback"
+    responses = await asyncio.gather(*(client.post(url, json={"helpful": False}) for _ in range(4)))
+    assert [r.status_code for r in responses] == [200] * 4
+    assert steward.feedbacks == [("fake-1", "e1", False)]
+
+
+async def test_save_rating_says_changed_once_when_two_first_ratings_race(
+    engine: AsyncEngine,
+) -> None:
+    """Two transactions rate the same answer for the first time at once: only one of them may
+    report a change (only that one is sent to steward)."""
+    import asyncio
+
+    from glassdesk.conversations import save_rating
+
+    user = await create_user(engine, "alice", "pw", "member")
+    async with engine.connect() as a, engine.connect() as b:
+        await a.begin()
+        await b.begin()
+        first = await save_rating(a, "run-1", user.id, False)  # inserted, not committed yet
+        second = asyncio.create_task(save_rating(b, "run-1", user.id, False))  # waits on a's row
+        await asyncio.sleep(0.2)
+        await a.commit()
+        second_changed = await second
+        await b.commit()
+    assert (first, second_changed) == (True, False)

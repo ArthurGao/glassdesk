@@ -1090,6 +1090,10 @@
             "type": "integer",
             "title": "Tokens"
           },
+          "tokens_unknown_runs": {
+            "type": "integer",
+            "title": "Tokens Unknown Runs"
+          },
           "cost_usd": {
             "anyOf": [
               {
@@ -1112,6 +1116,7 @@
           "answers",
           "failed",
           "tokens",
+          "tokens_unknown_runs",
           "cost_usd",
           "cost_unknown_runs"
         ],

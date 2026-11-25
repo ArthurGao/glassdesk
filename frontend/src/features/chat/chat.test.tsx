@@ -265,3 +265,21 @@ test('rating an answer posts the verdict and shows it pressed', async () => {
   expect(screen.getByRole('button', { name: '没帮助' })).toHaveAttribute('aria-pressed', 'false')
   expect(sent).toEqual({ helpful: true })
 })
+
+test('rating buttons are disabled while a rating is being saved', async () => {
+  let release: () => void = () => {}
+  api({ answers: [ANSWER] })
+  server.use(
+    http.post('*/api/conversations/c1/answers/r1/feedback', async () => {
+      await new Promise<void>((resolve) => (release = resolve))
+      return HttpResponse.json({ helpful: false })
+    }),
+  )
+  renderApp('/?c=c1')
+  await openIdle()
+  await userEvent.setup().click(await screen.findByRole('button', { name: '没帮助' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '有帮助' })).toBeDisabled())
+  expect(screen.getByRole('button', { name: '没帮助' })).toBeDisabled()
+  act(() => release())
+  await waitFor(() => expect(screen.getByRole('button', { name: '没帮助' })).toBeEnabled())
+})

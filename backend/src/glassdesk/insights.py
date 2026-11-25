@@ -26,7 +26,8 @@ class DayOut(BaseModel):
     day: date
     answers: int
     failed: int
-    tokens: int  # known tokens; a run that reported none adds nothing
+    tokens: int  # known tokens only
+    tokens_unknown_runs: int  # runs that reported no tokens: `tokens` leaves them out
     cost_usd: float | None  # sum of known costs; None when no run reported one
     cost_unknown_runs: int
 
@@ -53,13 +54,20 @@ class InsightsOut(BaseModel):
 
 
 def _day(
-    day: date, answers: int, failed: int, tokens: int, known: int, cost: float | None
+    day: date,
+    answers: int,
+    failed: int,
+    tokens: int,
+    tokens_unknown: int,
+    known: int,
+    cost: float | None,
 ) -> DayOut:
     return DayOut(
         day=day,
         answers=answers,
         failed=failed,
         tokens=tokens,
+        tokens_unknown_runs=tokens_unknown,
         cost_usd=cost if known else None,
         cost_unknown_runs=answers - known,
     )
@@ -82,6 +90,8 @@ async def insights(request: Request, user: Reviewer) -> InsightsOut:
     today = request.app.state.clock().astimezone(tz).date()
     first = today - timedelta(days=DAYS - 1)
     since = datetime.combine(first, time.min, tzinfo=tz)
+    until = datetime.combine(today + timedelta(days=1), time.min, tzinfo=tz)  # end of today
+    in_window = (run_usage.c.finished_at >= since) & (run_usage.c.finished_at < until)
     local_day = cast(func.timezone(tz.key, run_usage.c.finished_at), Date)
     known = run_usage.c.cost_usd.is_not(None)
     # steward's numbers come over HTTP: ask while the database is read
@@ -98,9 +108,14 @@ async def insights(request: Request, user: Reviewer) -> InsightsOut:
                         + func.coalesce(run_usage.c.output_tokens, 0)
                     ).label("tokens"),
                     func.count().filter(known).label("known"),
+                    func.count()
+                    .filter(
+                        run_usage.c.input_tokens.is_(None) & run_usage.c.output_tokens.is_(None)
+                    )
+                    .label("tokens_unknown"),
                     func.sum(run_usage.c.cost_usd).label("cost"),
                 )
-                .where(run_usage.c.finished_at >= since)
+                .where(in_window)
                 .group_by(local_day)
             )
         ).all()
@@ -115,7 +130,7 @@ async def insights(request: Request, user: Reviewer) -> InsightsOut:
                 .select_from(
                     answer_feedback.join(run_usage, run_usage.c.run_id == answer_feedback.c.run_id)
                 )
-                .where(run_usage.c.finished_at >= since)
+                .where(in_window)
             )
         ).one()
     by_day = {r.day: r for r in rows}
@@ -123,18 +138,18 @@ async def insights(request: Request, user: Reviewer) -> InsightsOut:
     for i in range(DAYS):
         d = first + timedelta(days=i)
         r = by_day.get(d)
-        cost = float(r.cost) if r is not None and r.cost is not None else None
-        days.append(
-            _day(d, r.answers, r.failed, int(r.tokens), r.known, cost)
-            if r is not None
-            else _day(d, 0, 0, 0, 0, None)
-        )
+        if r is None:
+            days.append(_day(d, 0, 0, 0, 0, 0, None))
+            continue
+        cost = float(r.cost) if r.cost is not None else None
+        days.append(_day(d, r.answers, r.failed, int(r.tokens), r.tokens_unknown, r.known, cost))
     known_total = sum(d.answers - d.cost_unknown_runs for d in days)
     totals = _day(
         today,
         sum(d.answers for d in days),
         sum(d.failed for d in days),
         sum(d.tokens for d in days),
+        sum(d.tokens_unknown_runs for d in days),
         known_total,
         round(sum(d.cost_usd or 0.0 for d in days), 6) if known_total else None,
     )

@@ -13,6 +13,12 @@ function cost(d: DayOut): string {
 }
 
 
+/** Known tokens, with how many runs reported none (they are not in the number). */
+function tokens(d: DayOut): string {
+  const known = d.tokens.toLocaleString()
+  return d.tokens_unknown_runs ? known + '（' + d.tokens_unknown_runs + ' 次未知）' : known
+}
+
 export function InsightsPage() {
   const query = useQuery({
     queryKey: insightsKeys.all,
@@ -23,15 +29,22 @@ export function InsightsPage() {
       return data
     },
   })
+  if (query.isError) {
+    return (
+      <p role="alert" className="p-6 text-red-600">
+        洞察暂时无法加载，请稍后再试。
+      </p>
+    )
+  }
   if (query.data === 'forbidden') return <p className="p-6 text-slate-500">需要审核权限才能查看洞察。</p>
   const body = query.data
-  if (!body) return null
+  if (!body) return <p className="p-6 text-slate-500">加载中…</p>
   const t = body.totals
   const rate = body.helpful_rate == null ? '—' : Math.round(body.helpful_rate * 100) + '%（' + body.rated + ' 次评价）'
   const tiles: Array<[string, string]> = [
     ['回答', String(t.answers)],
     ['失败', String(t.failed)],
-    ['tokens', t.tokens.toLocaleString()],
+    ['tokens', tokens(t)],
     ['成本', cost(t)],
     ['好评率', rate],
   ]
@@ -59,7 +72,7 @@ export function InsightsPage() {
               <td className="p-2">{d.day}</td>
               <td className="p-2">{d.answers}</td>
               <td className="p-2">{d.failed}</td>
-              <td className="p-2">{d.tokens.toLocaleString()}</td>
+              <td className="p-2">{tokens(d)}</td>
               <td className="p-2">{cost(d)}</td>
             </tr>
           ))}

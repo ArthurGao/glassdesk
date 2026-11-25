@@ -70,6 +70,7 @@ async def test_unknown_cost_is_counted_apart_and_an_empty_day_has_no_cost(
         "answers": 3,
         "failed": 1,
         "tokens": 240,
+        "tokens_unknown_runs": 1,
         "cost_usd": 0.03,
         "cost_unknown_runs": 1,
     }
@@ -78,6 +79,7 @@ async def test_unknown_cost_is_counted_apart_and_an_empty_day_has_no_cost(
         "answers": 0,
         "failed": 0,
         "tokens": 0,
+        "tokens_unknown_runs": 0,
         "cost_usd": None,
         "cost_unknown_runs": 0,
     }
@@ -128,3 +130,23 @@ async def test_members_cannot_see_insights(
     client = await client_for(make_app(search_then_answer("a"), FakeSteward()), engine, "alice")
     assert (await client.get("/api/insights")).status_code == 403
     await create_user(engine, "x", "pw", "member")
+
+
+async def test_rows_after_today_are_outside_the_window(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    client = await reviewer_client(make_app, engine, FakeSteward())
+    await add_run(engine, NOW, cost="0.01", helpful=True)
+    await add_run(engine, datetime(2026, 11, 26, 2, 0, tzinfo=UTC), cost="0.05", helpful=False)
+    body = (await client.get("/api/insights")).json()
+    assert (body["helpful_rate"], body["rated"], body["totals"]["answers"]) == (1.0, 1, 1)
+
+
+async def test_runs_with_unknown_tokens_are_counted_apart(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    client = await reviewer_client(make_app, engine, FakeSteward())
+    await add_run(engine, NOW, cost="0.01", tokens=(100, 20))
+    await add_run(engine, NOW, cost=None, tokens=(None, None))
+    totals = (await client.get("/api/insights")).json()["totals"]
+    assert (totals["tokens"], totals["tokens_unknown_runs"]) == (120, 1)

@@ -203,6 +203,10 @@ export type DayOut = {
      */
     tokens: number;
     /**
+     * Tokens Unknown Runs
+     */
+    tokens_unknown_runs: number;
+    /**
      * Cost Usd
      */
     cost_usd: number | null;

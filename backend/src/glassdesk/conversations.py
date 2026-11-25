@@ -375,6 +375,24 @@ class Feedback(BaseModel):
     helpful: bool
 
 
+async def save_rating(
+    conn: AsyncConnection, run_id: str, user_id: uuid.UUID, helpful: bool
+) -> bool:
+    """Store the user's rating; True when it is new or changed (steward must hear of it).
+
+    One statement decides: a second first rating racing this one waits on the unique key, then
+    finds the same value and writes nothing, so only one of them reports a change."""
+    stmt = pg_insert(answer_feedback).values(run_id=run_id, user_id=user_id, helpful=helpful)
+    written = await conn.execute(
+        stmt.on_conflict_do_update(
+            index_elements=["run_id", "user_id"],
+            set_={"helpful": stmt.excluded.helpful, "updated_at": func.now()},
+            where=answer_feedback.c.helpful.is_distinct_from(stmt.excluded.helpful),
+        ).returning(answer_feedback.c.run_id)
+    )
+    return written.first() is not None
+
+
 @router.post("/{conversation_id}/answers/{run_id}/feedback")
 async def rate_answer(
     run_id: str, body: Feedback, conv: Owned, request: Request, user: CurrentUser
@@ -388,21 +406,8 @@ async def rate_answer(
         raise HTTPException(404, "no such answer")
     answer = found[0]
     async with deps.engine.begin() as conn:
-        previous = await conn.scalar(
-            select(answer_feedback.c.helpful)
-            .where(answer_feedback.c.run_id == run_id, answer_feedback.c.user_id == user.id)
-            .with_for_update()
-        )
-        stmt = pg_insert(answer_feedback).values(
-            run_id=run_id, user_id=user.id, helpful=body.helpful
-        )
-        await conn.execute(
-            stmt.on_conflict_do_update(
-                index_elements=["run_id", "user_id"],
-                set_={"helpful": stmt.excluded.helpful, "updated_at": func.now()},
-            )
-        )
-    if previous == body.helpful:
+        changed = await save_rating(conn, run_id, user.id, body.helpful)
+    if not changed:
         # steward flags entries for review from these counts: a repeat must not count again
         return body
     if deps.steward is not None and answer.citations:
