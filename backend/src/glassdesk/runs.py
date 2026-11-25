@@ -21,6 +21,7 @@ class Runs:
         self._claims: dict[uuid.UUID, str] = {}  # conversation -> the run holding it
         self._after: dict[uuid.UUID, int] = {}  # conversation -> work still going after runs
         self._tasks: set[asyncio.Task[None]] = set()
+        self._released = asyncio.Condition()  # notified whenever a claim ends
         # conversation -> the run that ended without writing its end (raised, store gone)
         self.failed: dict[uuid.UUID, str] = {}
 
@@ -39,10 +40,27 @@ class Runs:
         self._claims[conversation_id] = run_id
         self.failed.pop(conversation_id, None)
 
+    async def claim_waiting(
+        self, conversation_id: uuid.UUID, run_id: str, *, timeout_s: float
+    ) -> None:
+        """`claim`, waiting up to `timeout_s` for the holder to let go: a run's answer is visible
+        a moment before its claim ends, and a question asked then is not a conflict."""
+        try:
+            async with asyncio.timeout(timeout_s), self._released:
+                await self._released.wait_for(lambda: conversation_id not in self._claims)
+                self.claim(conversation_id, run_id)
+        except TimeoutError:
+            raise Busy(str(conversation_id)) from None
+
     def release(self, conversation_id: uuid.UUID, run_id: str) -> None:
         """Only the run that holds the claim ends it: a later run's claim is left alone."""
         if self._claims.get(conversation_id) == run_id:
             del self._claims[conversation_id]
+            asyncio.get_running_loop().create_task(self._notify())
+
+    async def _notify(self) -> None:
+        async with self._released:
+            self._released.notify_all()
 
     def start(
         self,

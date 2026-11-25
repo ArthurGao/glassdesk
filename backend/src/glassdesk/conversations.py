@@ -44,6 +44,7 @@ from glassdesk.users import metadata
 log = logging.getLogger(__name__)
 
 POLL_S = 0.25
+CLAIM_WAIT_S = 3.0  # a run that just answered is still writing its usage row
 NEW_TITLE = "新会话"
 TITLE_CHARS = 30
 
@@ -248,7 +249,7 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
         raise HTTPException(503, "模型或知识库未配置")
     try:
         run_id = uuid.uuid4().hex
-        runs.claim(conv.id, run_id)
+        await runs.claim_waiting(conv.id, run_id, timeout_s=CLAIM_WAIT_S)
     except Busy:
         raise HTTPException(409, "上一个问题还在处理中") from None
     try:
