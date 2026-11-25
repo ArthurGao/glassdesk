@@ -126,6 +126,7 @@ def test_answer_maps_markers_and_reports_unmatched() -> None:
     events = run_events(answer="上限 800 元[1]，需审批[3]，见[1]。")
     answer = project_answer(events, {"c1": [passage(1), passage(2)]}, "r1")
     assert answer is not None
+    assert answer.question == "报销上限？"
     assert answer.text == "上限 800 元[1]，需审批[3]，见[1]。"
     assert [(c.n, c.item_id, c.text, c.verified) for c in answer.citations] == [
         (1, "e1", "text 1", True)

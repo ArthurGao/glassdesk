@@ -61,6 +61,7 @@ class Citation(BaseModel):
 
 class Answer(BaseModel):
     run_id: str
+    question: str  # the run's task, in full
     text: str
     citations: list[Citation]
     unmatched: list[int]  # markers the model wrote that no search result backs
@@ -205,6 +206,7 @@ def project_answer(
     mine = [e for e in events if e.run_id == run_id]
     if not any(isinstance(e, RunFinished) for e in mine):
         return None
+    question = next((e.text for e in mine if isinstance(e, UserMessage) and e.origin == "task"), "")
     turns = [e for e in mine if isinstance(e, ModelTurn) and e.stop != "tool_calls"]
     text = "".join(b.text for b in turns[-1].blocks if isinstance(b, TextBlock)) if turns else ""
     searches = [
@@ -231,4 +233,6 @@ def project_answer(
                     verified=hit.verified,
                 )
             )
-    return Answer(run_id=run_id, text=text, citations=citations, unmatched=unmatched)
+    return Answer(
+        run_id=run_id, question=question, text=text, citations=citations, unmatched=unmatched
+    )

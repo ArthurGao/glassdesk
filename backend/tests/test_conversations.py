@@ -61,16 +61,18 @@ async def test_ask_streams_steps_then_answer(
     body = (await client.get(f"/api/conversations/{conv_id}/stream")).text
     messages = parse_sse(body)
     kinds = [m[0] for m in messages]
-    assert kinds[-1] == "answer" and set(kinds[:-1]) == {"step"}
-    assert [m[2]["kind"] for m in messages[:-1]] == [
+    # the stream ends with the answer, then `end` so the browser does not reconnect
+    assert kinds[-2:] == ["answer", "end"] and set(kinds[:-2]) == {"step"}
+    assert [m[2]["kind"] for m in messages[:-2]] == [
         "question",
         "thinking",
         "tool",
         "answer",
         "finished",
     ]
-    answer = messages[-1][2]
+    answer = messages[-2][2]
     assert answer["run_id"] == run_id
+    assert answer["question"] == "报销上限是多少？"
     assert answer["text"] == "上限每晚 800 元[1]。"
     assert [(c["n"], c["item_id"]) for c in answer["citations"]] == [(1, "e1")]
     listed = (await client.get("/api/conversations")).json()
@@ -128,7 +130,7 @@ async def test_stream_resumes_from_last_event_id_without_duplicates(
         m[2]["seq"] for m in resumed if m[0] == "step"
     ]
     assert seen == [m[2]["seq"] for m in steps]
-    assert resumed[-1][0] == "answer"
+    assert [m[0] for m in resumed[-2:]] == ["answer", "end"]
 
 
 async def test_steward_down_run_finishes_with_error_step(
@@ -140,7 +142,8 @@ async def test_steward_down_run_finishes_with_error_step(
     messages = parse_sse((await client.get(f"/api/conversations/{conv_id}/stream")).text)
     tool = next(m[2] for m in messages if m[0] == "step" and m[2]["kind"] == "tool")
     assert tool["status"] == "error"
-    assert messages[-1][0] == "answer" and messages[-1][2]["citations"] == []
+    assert [m[0] for m in messages[-2:]] == ["answer", "end"]
+    assert messages[-2][2]["citations"] == []
 
 
 async def test_empty_or_too_long_text_is_422(
@@ -154,3 +157,12 @@ async def test_empty_or_too_long_text_is_422(
         )
         assert response.status_code == 422
     await asyncio.sleep(0)
+
+
+async def test_a_stream_with_nothing_running_ends_at_once(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    client = await client_for(make_app(search_then_answer("a")), engine, "alice")
+    conv = (await client.post("/api/conversations")).json()
+    messages = parse_sse((await client.get(f"/api/conversations/{conv['id']}/stream")).text)
+    assert [m[0] for m in messages] == ["end"]

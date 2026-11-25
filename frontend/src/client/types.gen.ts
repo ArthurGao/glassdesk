@@ -5,6 +5,88 @@ export type ClientOptions = {
 };
 
 /**
+ * Answer
+ */
+export type Answer = {
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Question
+     */
+    question: string;
+    /**
+     * Text
+     */
+    text: string;
+    /**
+     * Citations
+     */
+    citations: Array<Citation>;
+    /**
+     * Unmatched
+     */
+    unmatched: Array<number>;
+};
+
+/**
+ * Citation
+ */
+export type Citation = {
+    /**
+     * N
+     */
+    n: number;
+    /**
+     * Item Id
+     */
+    item_id: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Title
+     */
+    title: string | null;
+    /**
+     * Source
+     */
+    source: string | null;
+    /**
+     * Text
+     */
+    text: string;
+    /**
+     * Verified
+     */
+    verified: boolean;
+};
+
+/**
+ * ConversationOut
+ */
+export type ConversationOut = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -40,6 +122,83 @@ export type MeOut = {
      * Role
      */
     role: 'member' | 'reviewer' | 'admin';
+};
+
+/**
+ * MessageIn
+ */
+export type MessageIn = {
+    /**
+     * Text
+     */
+    text: string;
+};
+
+/**
+ * RunOut
+ */
+export type RunOut = {
+    /**
+     * Run Id
+     */
+    run_id: string;
+};
+
+/**
+ * Step
+ */
+export type Step = {
+    /**
+     * Seq
+     */
+    seq: number;
+    /**
+     * Run Id
+     */
+    run_id: string;
+    /**
+     * Kind
+     */
+    kind: 'question' | 'thinking' | 'tool' | 'answer' | 'error' | 'finished';
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Detail
+     */
+    detail: string | null;
+    /**
+     * Status
+     */
+    status: 'running' | 'ok' | 'error';
+    /**
+     * Started At
+     */
+    started_at: string;
+    /**
+     * Duration Ms
+     */
+    duration_ms: number | null;
+    usage: Usage | null;
+};
+
+/**
+ * Usage
+ */
+export type Usage = {
+    /**
+     * Input
+     */
+    input: number | null;
+    /**
+     * Output
+     */
+    output: number | null;
+    /**
+     * Cost Usd
+     */
+    cost_usd: number | null;
 };
 
 /**
@@ -146,3 +305,175 @@ export type MeResponses = {
 };
 
 export type MeResponse = MeResponses[keyof MeResponses];
+
+export type ListConversationsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/conversations';
+};
+
+export type ListConversationsResponses = {
+    /**
+     * Response List Conversations
+     *
+     * Successful Response
+     */
+    200: Array<ConversationOut>;
+};
+
+export type ListConversationsResponse = ListConversationsResponses[keyof ListConversationsResponses];
+
+export type CreateConversationData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/conversations';
+};
+
+export type CreateConversationResponses = {
+    /**
+     * Successful Response
+     */
+    201: ConversationOut;
+};
+
+export type CreateConversationResponse = CreateConversationResponses[keyof CreateConversationResponses];
+
+export type AskData = {
+    body: MessageIn;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/conversations/{conversation_id}/messages';
+};
+
+export type AskErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AskError = AskErrors[keyof AskErrors];
+
+export type AskResponses = {
+    /**
+     * Successful Response
+     */
+    202: RunOut;
+};
+
+export type AskResponse = AskResponses[keyof AskResponses];
+
+export type GetStepsData = {
+    body?: never;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: {
+        /**
+         * After
+         */
+        after?: number;
+    };
+    url: '/api/conversations/{conversation_id}/steps';
+};
+
+export type GetStepsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GetStepsError = GetStepsErrors[keyof GetStepsErrors];
+
+export type GetStepsResponses = {
+    /**
+     * Response Get Steps
+     *
+     * Successful Response
+     */
+    200: Array<Step>;
+};
+
+export type GetStepsResponse = GetStepsResponses[keyof GetStepsResponses];
+
+export type GetAnswersData = {
+    body?: never;
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/conversations/{conversation_id}/answers';
+};
+
+export type GetAnswersErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GetAnswersError = GetAnswersErrors[keyof GetAnswersErrors];
+
+export type GetAnswersResponses = {
+    /**
+     * Response Get Answers
+     *
+     * Successful Response
+     */
+    200: Array<Answer>;
+};
+
+export type GetAnswersResponse = GetAnswersResponses[keyof GetAnswersResponses];
+
+export type StreamData = {
+    body?: never;
+    headers?: {
+        /**
+         * Last-Event-Id
+         */
+        'last-event-id'?: string | null;
+    };
+    path: {
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: {
+        /**
+         * After
+         */
+        after?: number;
+    };
+    url: '/api/conversations/{conversation_id}/stream';
+};
+
+export type StreamErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type StreamError = StreamErrors[keyof StreamErrors];
+
+export type StreamResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};

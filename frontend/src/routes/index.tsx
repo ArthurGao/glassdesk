@@ -1,5 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { ChatPage } from '@/features/chat/ChatPage'
 
 export const Route = createFileRoute('/')({
-  component: () => <p className="p-6 text-slate-500">聊天：即将推出</p>,
+  validateSearch: (search: Record<string, unknown>): { c?: string } =>
+    typeof search.c === 'string' ? { c: search.c } : {},
+  component: function Chat() {
+    const { c } = Route.useSearch()
+    return <ChatPage conversationId={c} />
+  },
 })

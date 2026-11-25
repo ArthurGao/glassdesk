@@ -234,7 +234,8 @@ async def stream(
     after: Annotated[int, Query(ge=0)] = 0,
     last_event_id: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[ServerSentEvent]:
-    """`step` events (id = a cursor to resume after) while a run goes, then the last `answer`."""
+    """`step` events (id = a cursor to resume after) while a run goes, then the last `answer`,
+    then `end`: without it a browser's EventSource reconnects when the stream closes."""
     deps, runs = _deps(request), _runs(request)
     cursor = int(last_event_id) if last_event_id and last_event_id.isdigit() else after
     while True:
@@ -251,3 +252,4 @@ async def stream(
     answers = await _answers(deps.engine, events)
     if answers:
         yield ServerSentEvent(data=answers[-1], event="answer")
+    yield ServerSentEvent(data={}, event="end")
