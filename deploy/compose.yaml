@@ -46,7 +46,10 @@ services:
       # [] until bootstrap.sh creates steward's key; lite-rag refuses to serve without one
       LITERAG_SERVER__KEYS: ${LITERAG_SERVER__KEYS:-[]}
       LITERAG_EMBEDDING__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}
-      LITERAG_LLM__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
+      # lite-model settings (lite-rag S15): a backend's base_url lives under llm.backends.<name>
+      LITERAG_LLM__BACKEND: ollama
+      LITERAG_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
+      LITERAG_LLM__BACKENDS: '{"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}'
       LITERAG_LLM__REASONING_EFFORT: none
     extra_hosts: ["host.docker.internal:host-gateway"]
     restart: unless-stopped
@@ -65,7 +68,8 @@ services:
       STEWARD_LITERAG_API_KEY: ${STEWARD_LITERAG_API_KEY:-}
       STEWARD_MEMORY_PROVIDER: litemem
       STEWARD_LITEMEM_MODE: inprocess
-      LITEMEM_EMBEDDING__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}
+      # lite-model settings (lite-mem S14): the embed backend's OpenAI-compatible root
+      LITEMEM_EMBEDDING__BACKENDS__OLLAMA__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
       LITEMEM_LLM__BACKENDS__OPENAI__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
       LITEMEM_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
       # the KB pipeline's model steps (risk, worthiness, drafting): without them steward makes

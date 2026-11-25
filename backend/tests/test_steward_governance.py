@@ -174,6 +174,29 @@ async def test_extraction_gets_more_time_than_a_search() -> None:
             },
         )
 
-    respx.post(f"{BASE}/v1/episodes").mock(side_effect=slow)
+    route = respx.post(f"{BASE}/v1/episodes").mock(side_effect=slow)
     steward = HttpSteward(BASE, "stw_k", timeout_s=0.1, model_timeout_s=2.0)
     assert await steward.report_episode([("user", "q")], user_id="u1", session_id="s1") == []
+    # respx does not enforce timeouts: check the one the request was sent with
+    assert route.calls[0].request.extensions["timeout"]["read"] == 2.0
+
+
+@respx.mock
+async def test_writing_an_entry_gets_the_model_timeout() -> None:
+    """Steward judges risk and embeds before it answers a new entry: on a cold model that takes
+    longer than a search, and the short timeout failed the first deployment's demo seed."""
+    import asyncio
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.3)
+        return httpx.Response(201, json={"entry": entry_json(), "candidate": None})
+
+    respx.get(f"{BASE}/v1/kb/collections").mock(
+        return_value=httpx.Response(200, json=collections("company"))
+    )
+    route = respx.post(f"{BASE}/v1/kb/entries").mock(side_effect=slow)
+    steward = HttpSteward(BASE, "stw_k", collection="company", timeout_s=0.1, model_timeout_s=2.0)
+    written = await steward.create_entry("差旅制度", "800 元", author="alice")
+    assert written.entry is not None and written.entry.status == "active"
+    # respx does not enforce timeouts: check the one the request was sent with
+    assert route.calls[0].request.extensions["timeout"]["read"] == 2.0

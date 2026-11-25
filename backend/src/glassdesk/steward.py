@@ -293,7 +293,8 @@ class HttpSteward:
         col = await self.ensure_collection()
         out = await _call(
             "create entry",
-            self._client.kb.entries.create(
+            # steward judges risk and embeds before answering: a model call on its side
+            self._model_client.kb.entries.create(
                 col, title, content, source_refs=[{"type": "glassdesk_user", "id": author}]
             ),
         )
