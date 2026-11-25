@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { KnowledgePage } from '@/features/kb/KnowledgePage'
 
-export const Route = createFileRoute('/knowledge')({
-  component: () => <p className="p-6 text-slate-500">知识库：即将推出</p>,
-})
+export const Route = createFileRoute('/knowledge')({ component: KnowledgePage })
