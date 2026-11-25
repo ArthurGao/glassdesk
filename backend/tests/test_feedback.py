@@ -76,3 +76,17 @@ async def test_every_run_records_its_usage(
     assert [(r.run_id, r.conversation_id, r.failed, r.cost_usd) for r in rows] == [
         (run_id, conv_id, False, None)
     ]
+
+
+async def test_repeating_the_same_rating_tells_steward_once(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    """steward flags entries for review from these counts: a rating resent many times must not
+    count many times."""
+    steward = FakeSteward([P1])
+    client = await client_for(make_app(search_then_answer("800 元[1]"), steward), engine, "alice")
+    conv_id, run_id = await answered(client)
+    url = f"/api/conversations/{conv_id}/answers/{run_id}/feedback"
+    for _ in range(5):
+        assert (await client.post(url, json={"helpful": False})).status_code == 200
+    assert steward.feedbacks == [("fake-1", "e1", False)]

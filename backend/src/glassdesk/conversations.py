@@ -384,14 +384,24 @@ async def rate_answer(
     if not found:  # not a finished run of this conversation
         raise HTTPException(404, "no such answer")
     answer = found[0]
-    stmt = pg_insert(answer_feedback).values(run_id=run_id, user_id=user.id, helpful=body.helpful)
     async with deps.engine.begin() as conn:
+        previous = await conn.scalar(
+            select(answer_feedback.c.helpful)
+            .where(answer_feedback.c.run_id == run_id, answer_feedback.c.user_id == user.id)
+            .with_for_update()
+        )
+        stmt = pg_insert(answer_feedback).values(
+            run_id=run_id, user_id=user.id, helpful=body.helpful
+        )
         await conn.execute(
             stmt.on_conflict_do_update(
                 index_elements=["run_id", "user_id"],
                 set_={"helpful": stmt.excluded.helpful, "updated_at": func.now()},
             )
         )
+    if previous == body.helpful:
+        # steward flags entries for review from these counts: a repeat must not count again
+        return FeedbackOut(helpful=body.helpful)
     if deps.steward is not None and answer.citations:
         async with deps.engine.connect() as conn:
             retrieval_of = {
