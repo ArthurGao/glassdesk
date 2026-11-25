@@ -5,10 +5,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
+from lite_agent.pg import PgSessionStore
+from lite_model import RolePolicy, RoleSpec, build_async
 
-from glassdesk import auth
+from glassdesk import auth, conversations
+from glassdesk.agent import ROLE
 from glassdesk.config import Settings
-from glassdesk.db import Deps, make_engine
+from glassdesk.db import Deps, make_engine, sync_url
+from glassdesk.runs import Runs
+from glassdesk.steward import HttpSteward
 
 
 def _operation_id(route: APIRoute) -> str:
@@ -16,7 +21,24 @@ def _operation_id(route: APIRoute) -> str:
 
 
 def build_deps(settings: Settings) -> Deps:
-    return Deps(engine=make_engine(settings.database_url, settings.db_schema))
+    model = build_async(settings.llm, RoleSpec({ROLE: RolePolicy()})) if settings.llm else None
+    return Deps(
+        engine=make_engine(settings.database_url, settings.db_schema),
+        model=model,
+        sessions=PgSessionStore(sync_url(settings.database_url), schema=settings.agent_schema),
+        steward=HttpSteward(settings.steward_url, settings.steward_api_key.get_secret_value()),
+    )
+
+
+async def close_deps(deps: Deps) -> None:
+    if isinstance(deps.steward, HttpSteward):
+        await deps.steward.aclose()
+    if isinstance(deps.sessions, PgSessionStore):
+        await deps.sessions.close()
+    aclose = getattr(deps.model, "aclose", None)
+    if aclose is not None:
+        await aclose()
+    await deps.engine.dispose()
 
 
 def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
@@ -25,8 +47,9 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
+        await app.state.runs.drain()
         if owned:
-            await app.state.deps.engine.dispose()
+            await close_deps(app.state.deps)
 
     app = FastAPI(
         title="glassdesk",
@@ -37,10 +60,12 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.deps = deps if deps is not None else build_deps(settings)
+    app.state.runs = Runs()
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     app.include_router(auth.router)
+    app.include_router(conversations.router)
     return app

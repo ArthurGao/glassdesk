@@ -78,7 +78,9 @@ async def run(argv: Sequence[str] | None, *, deps: Deps | None = None) -> int:
         return 0
     finally:
         if owned:
-            await deps.engine.dispose()
+            from glassdesk.app import close_deps
+
+            await close_deps(deps)
 
 
 def _openapi() -> dict[str, object]:

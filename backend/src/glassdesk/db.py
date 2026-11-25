@@ -7,13 +7,17 @@ from pathlib import Path
 import psycopg
 from alembic import command
 from alembic.config import Config
+from lite_agent import SessionStore
 from lite_agent.pg.db import migrate as migrate_agent_schema
+from lite_model import AsyncToolModel
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from glassdesk.steward import StewardPort
 
 MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
 
 
-def _sync_url(url: str) -> str:
+def sync_url(url: str) -> str:
     return url.replace("postgresql+psycopg://", "postgresql://", 1)
 
 
@@ -27,6 +31,9 @@ class Deps:
     """What the app runs on; tests pass their own, `create_app` builds it from settings."""
 
     engine: AsyncEngine
+    model: AsyncToolModel | None = None  # None: no model configured; asking answers 503
+    sessions: SessionStore | None = None  # lite-agent's event log
+    steward: StewardPort | None = None
 
 
 def _migrate(url: str, schema: str, agent_schema: str) -> None:
@@ -35,7 +42,7 @@ def _migrate(url: str, schema: str, agent_schema: str) -> None:
     cfg.attributes["url"] = url
     cfg.attributes["schema"] = schema
     command.upgrade(cfg, "head")
-    with psycopg.connect(_sync_url(url), autocommit=True) as conn:
+    with psycopg.connect(sync_url(url), autocommit=True) as conn:
         migrate_agent_schema(conn, agent_schema)
 
 

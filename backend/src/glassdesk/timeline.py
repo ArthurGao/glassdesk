@@ -186,10 +186,16 @@ def project_steps(events: Sequence[Event]) -> list[Step]:
     return [o.step for o in _project(events)]
 
 
+def changes(events: Sequence[Event], after_seq: int) -> list[tuple[int, Step]]:
+    """(cursor, step) for every step that changed after event `after_seq`: new ones, and a tool
+    step whose result came later (sent again under its own `seq`, so the page replaces it).
+    Ordered by cursor, so a stream that resumes after any cursor it sent misses nothing."""
+    changed = [(o.last_seq, o.step) for o in _project(events) if o.last_seq > after_seq]
+    return sorted(changed, key=lambda c: c[0])
+
+
 def steps_after(events: Sequence[Event], after_seq: int) -> list[Step]:
-    """Steps that changed after event `after_seq`: new ones, and a tool step whose result came
-    later (sent again under its own `seq`, so the page replaces it). In step order."""
-    return [o.step for o in _project(events) if o.last_seq > after_seq]
+    return [step for _, step in changes(events, after_seq)]
 
 
 def project_answer(
