@@ -281,6 +281,66 @@
         }
       }
     },
+    "/api/conversations/{conversation_id}/answers/{run_id}/feedback": {
+      "post": {
+        "summary": "Rate Answer",
+        "description": "The user's verdict on one answer: kept here (one per user, the latest wins) and passed to\nsteward for every item the answer cited, best effort.",
+        "operationId": "rate_answer",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/conversations/{conversation_id}/stream": {
       "get": {
         "summary": "Stream",
@@ -709,6 +769,24 @@
           }
         }
       }
+    },
+    "/api/insights": {
+      "get": {
+        "summary": "Insights",
+        "operationId": "insights",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightsOut"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -759,6 +837,17 @@
             },
             "type": "array",
             "title": "Unmatched"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
           }
         },
         "type": "object",
@@ -982,6 +1071,52 @@
         ],
         "title": "ConversationOut"
       },
+      "DayOut": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day"
+          },
+          "answers": {
+            "type": "integer",
+            "title": "Answers"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "cost_unknown_runs": {
+            "type": "integer",
+            "title": "Cost Unknown Runs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "answers",
+          "failed",
+          "tokens",
+          "cost_usd",
+          "cost_unknown_runs"
+        ],
+        "title": "DayOut"
+      },
       "DecisionOut": {
         "properties": {
           "status": {
@@ -1129,6 +1264,50 @@
         ],
         "title": "EntryOut"
       },
+      "FeedbackIn": {
+        "properties": {
+          "helpful": {
+            "type": "boolean",
+            "title": "Helpful"
+          }
+        },
+        "type": "object",
+        "required": [
+          "helpful"
+        ],
+        "title": "FeedbackIn"
+      },
+      "FeedbackOut": {
+        "properties": {
+          "helpful": {
+            "type": "boolean",
+            "title": "Helpful"
+          }
+        },
+        "type": "object",
+        "required": [
+          "helpful"
+        ],
+        "title": "FeedbackOut"
+      },
+      "Gap": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "count"
+        ],
+        "title": "Gap"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1141,6 +1320,93 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "InsightsOut": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/DayOut"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/DayOut"
+          },
+          "helpful_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Helpful Rate"
+          },
+          "rated": {
+            "type": "integer",
+            "title": "Rated"
+          },
+          "kb": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KbOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "demo": {
+            "type": "boolean",
+            "title": "Demo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "totals",
+          "helpful_rate",
+          "rated",
+          "kb",
+          "demo"
+        ],
+        "title": "InsightsOut"
+      },
+      "KbOut": {
+        "properties": {
+          "entries_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Entries By Status"
+          },
+          "pending_reviews": {
+            "type": "integer",
+            "title": "Pending Reviews"
+          },
+          "awaiting_user": {
+            "type": "integer",
+            "title": "Awaiting User"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/Gap"
+            },
+            "type": "array",
+            "title": "Gaps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries_by_status",
+          "pending_reviews",
+          "awaiting_user",
+          "gaps"
+        ],
+        "title": "KbOut"
       },
       "LoginIn": {
         "properties": {

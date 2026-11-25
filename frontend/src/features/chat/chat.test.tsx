@@ -20,6 +20,7 @@ const ANSWER: Answer = {
   question: '报销上限是多少？',
   text: '上限 800 元[1]，需审批[3]。',
   failed: false,
+  feedback: null,
   citations: [
     { n: 1, item_id: 'e1', kind: 'entry', title: '差旅制度 v3', source: 'kb', text: '住宿上限每晚 800 元', verified: true },
   ],
@@ -244,4 +245,23 @@ test('Send unlocks with the answer, while steward is still reading the episode',
   act(() => MockEventSource.last().emit('answer', { ...ANSWER, run_id: 'r2' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
   expect(MockEventSource.last().closed).toBe(false) // still listening for cards and end
+})
+
+test('rating an answer posts the verdict and shows it pressed', async () => {
+  let sent: unknown = null
+  api({ answers: [ANSWER] })
+  server.use(
+    http.post('*/api/conversations/c1/answers/r1/feedback', async ({ request }) => {
+      sent = await request.json()
+      return HttpResponse.json({ helpful: true })
+    }),
+  )
+  renderApp('/?c=c1')
+  await openIdle()
+  const helpful = await screen.findByRole('button', { name: '有帮助' })
+  expect(helpful).toHaveAttribute('aria-pressed', 'false')
+  await userEvent.setup().click(helpful)
+  await waitFor(() => expect(screen.getByRole('button', { name: '有帮助' })).toHaveAttribute('aria-pressed', 'true'))
+  expect(screen.getByRole('button', { name: '没帮助' })).toHaveAttribute('aria-pressed', 'false')
+  expect(sent).toEqual({ helpful: true })
 })

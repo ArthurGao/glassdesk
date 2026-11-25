@@ -42,6 +42,10 @@ export type Answer = {
      * Unmatched
      */
     unmatched: Array<number>;
+    /**
+     * Feedback
+     */
+    feedback?: boolean | null;
 };
 
 /**
@@ -179,6 +183,36 @@ export type ConversationOut = {
 };
 
 /**
+ * DayOut
+ */
+export type DayOut = {
+    /**
+     * Day
+     */
+    day: string;
+    /**
+     * Answers
+     */
+    answers: number;
+    /**
+     * Failed
+     */
+    failed: number;
+    /**
+     * Tokens
+     */
+    tokens: number;
+    /**
+     * Cost Usd
+     */
+    cost_usd: number | null;
+    /**
+     * Cost Unknown Runs
+     */
+    cost_unknown_runs: number;
+};
+
+/**
  * DecisionOut
  */
 export type DecisionOut = {
@@ -279,6 +313,40 @@ export type EntryOut = {
 };
 
 /**
+ * FeedbackIn
+ */
+export type FeedbackIn = {
+    /**
+     * Helpful
+     */
+    helpful: boolean;
+};
+
+/**
+ * FeedbackOut
+ */
+export type FeedbackOut = {
+    /**
+     * Helpful
+     */
+    helpful: boolean;
+};
+
+/**
+ * Gap
+ */
+export type Gap = {
+    /**
+     * Query
+     */
+    query: string;
+    /**
+     * Count
+     */
+    count: number;
+};
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -286,6 +354,54 @@ export type HttpValidationError = {
      * Detail
      */
     detail?: Array<ValidationError>;
+};
+
+/**
+ * InsightsOut
+ */
+export type InsightsOut = {
+    /**
+     * Days
+     */
+    days: Array<DayOut>;
+    totals: DayOut;
+    /**
+     * Helpful Rate
+     */
+    helpful_rate: number | null;
+    /**
+     * Rated
+     */
+    rated: number;
+    kb: KbOut | null;
+    /**
+     * Demo
+     */
+    demo: boolean;
+};
+
+/**
+ * KbOut
+ */
+export type KbOut = {
+    /**
+     * Entries By Status
+     */
+    entries_by_status: {
+        [key: string]: number;
+    };
+    /**
+     * Pending Reviews
+     */
+    pending_reviews: number;
+    /**
+     * Awaiting User
+     */
+    awaiting_user: number;
+    /**
+     * Gaps
+     */
+    gaps: Array<Gap>;
 };
 
 /**
@@ -660,6 +776,40 @@ export type GetAnswersResponses = {
 
 export type GetAnswersResponse = GetAnswersResponses[keyof GetAnswersResponses];
 
+export type RateAnswerData = {
+    body: FeedbackIn;
+    path: {
+        /**
+         * Run Id
+         */
+        run_id: string;
+        /**
+         * Conversation Id
+         */
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/conversations/{conversation_id}/answers/{run_id}/feedback';
+};
+
+export type RateAnswerErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RateAnswerError = RateAnswerErrors[keyof RateAnswerErrors];
+
+export type RateAnswerResponses = {
+    /**
+     * Successful Response
+     */
+    200: FeedbackOut;
+};
+
+export type RateAnswerResponse = RateAnswerResponses[keyof RateAnswerResponses];
+
 export type StreamData = {
     body?: never;
     headers?: {
@@ -940,3 +1090,19 @@ export type RejectResponses = {
 };
 
 export type RejectResponse = RejectResponses[keyof RejectResponses];
+
+export type InsightsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/insights';
+};
+
+export type InsightsResponses = {
+    /**
+     * Successful Response
+     */
+    200: InsightsOut;
+};
+
+export type InsightsResponse = InsightsResponses[keyof InsightsResponses];

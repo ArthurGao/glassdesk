@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { createConversation, getAnswers, listConversations } from '@/client/sdk.gen'
+import { AnswerFeedback } from './AnswerFeedback'
 import { AnswerText } from './CitationChip'
 import { Composer } from './Composer'
 import { SuggestionCards } from './SuggestionCards'
@@ -65,7 +66,10 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
                     {a.failed ? (
                       <p className="text-slate-500">{FAILED}</p>
                     ) : (
-                      <AnswerText answer={a} />
+                      <>
+                        <AnswerText answer={a} />
+                        <AnswerFeedback conversationId={conversationId} answer={a} />
+                      </>
                     )}
                   </div>
                 </article>

@@ -1,5 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { InsightsPage } from '@/features/insights/InsightsPage'
 
-export const Route = createFileRoute('/insights')({
-  component: () => <p className="p-6 text-slate-500">洞察：即将推出</p>,
-})
+export const Route = createFileRoute('/insights')({ component: InsightsPage })

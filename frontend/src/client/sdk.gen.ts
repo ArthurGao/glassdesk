@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type ServerSentEventsResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptCardData, AcceptCardErrors, AcceptCardResponses, ApproveData, ApproveErrors, ApproveResponses, AskData, AskErrors, AskResponses, CreateConversationData, CreateConversationResponses, CreateEntryData, CreateEntryErrors, CreateEntryResponses, GetAnswersData, GetAnswersErrors, GetAnswersResponses, GetStepsData, GetStepsErrors, GetStepsResponses, HealthData, HealthResponses, ListCardsData, ListCardsResponses, ListConversationsData, ListConversationsResponses, ListDocumentsData, ListDocumentsResponses, ListEntriesData, ListEntriesResponses, ListReviewsData, ListReviewsResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutResponses, MeData, MeResponses, RejectCardData, RejectCardErrors, RejectCardResponses, RejectData, RejectErrors, RejectResponses, StreamData, StreamErrors, StreamResponses, UploadDocumentData, UploadDocumentErrors, UploadDocumentResponses } from './types.gen';
+import type { AcceptCardData, AcceptCardErrors, AcceptCardResponses, ApproveData, ApproveErrors, ApproveResponses, AskData, AskErrors, AskResponses, CreateConversationData, CreateConversationResponses, CreateEntryData, CreateEntryErrors, CreateEntryResponses, GetAnswersData, GetAnswersErrors, GetAnswersResponses, GetStepsData, GetStepsErrors, GetStepsResponses, HealthData, HealthResponses, InsightsData, InsightsResponses, ListCardsData, ListCardsResponses, ListConversationsData, ListConversationsResponses, ListDocumentsData, ListDocumentsResponses, ListEntriesData, ListEntriesResponses, ListReviewsData, ListReviewsResponses, LoginData, LoginErrors, LoginResponses, LogoutData, LogoutResponses, MeData, MeResponses, RateAnswerData, RateAnswerErrors, RateAnswerResponses, RejectCardData, RejectCardErrors, RejectCardResponses, RejectData, RejectErrors, RejectResponses, StreamData, StreamErrors, StreamResponses, UploadDocumentData, UploadDocumentErrors, UploadDocumentResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -76,6 +76,21 @@ export const getSteps = <ThrowOnError extends boolean = false>(options: Options<
  * Get Answers
  */
 export const getAnswers = <ThrowOnError extends boolean = false>(options: Options<GetAnswersData, ThrowOnError>): RequestResult<GetAnswersResponses, GetAnswersErrors, ThrowOnError> => (options.client ?? client).get<GetAnswersResponses, GetAnswersErrors, ThrowOnError>({ url: '/api/conversations/{conversation_id}/answers', ...options });
+
+/**
+ * Rate Answer
+ *
+ * The user's verdict on one answer: kept here (one per user, the latest wins) and passed to
+ * steward for every item the answer cited, best effort.
+ */
+export const rateAnswer = <ThrowOnError extends boolean = false>(options: Options<RateAnswerData, ThrowOnError>): RequestResult<RateAnswerResponses, RateAnswerErrors, ThrowOnError> => (options.client ?? client).post<RateAnswerResponses, RateAnswerErrors, ThrowOnError>({
+    url: '/api/conversations/{conversation_id}/answers/{run_id}/feedback',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
 
 /**
  * Stream
@@ -172,3 +187,8 @@ export const reject = <ThrowOnError extends boolean = false>(options: Options<Re
         ...options.headers
     }
 });
+
+/**
+ * Insights
+ */
+export const insights = <ThrowOnError extends boolean = false>(options?: Options<InsightsData, ThrowOnError>): RequestResult<InsightsResponses, unknown, ThrowOnError> => (options?.client ?? client).get<InsightsResponses, unknown, ThrowOnError>({ url: '/api/insights', ...options });
