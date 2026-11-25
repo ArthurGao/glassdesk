@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel
 
-from glassdesk.users import Role, User, authenticate, get_user
+from glassdesk.users import Role, User, authenticate, end_sessions, get_user
 
 COOKIE = "glassdesk_session"
 MAX_AGE_S = 7 * 24 * 3600
@@ -33,11 +33,12 @@ async def current_user(request: Request) -> User:
     if token is None:
         raise HTTPException(401, "not logged in")
     try:
-        user_id = _serializer(request).loads(token, max_age=MAX_AGE_S)
+        user_id, version = _serializer(request).loads(token, max_age=MAX_AGE_S)
         user = await get_user(request.app.state.deps.engine, uuid.UUID(user_id))
-    except (BadSignature, ValueError):
+    except (BadSignature, ValueError, TypeError):
         user = None
-    if user is None:
+    # A cookie signed before the last logout carries an older version.
+    if user is None or user.session_version != version:
         raise HTTPException(401, "not logged in")
     return user
 
@@ -54,7 +55,7 @@ async def login(body: LoginIn, request: Request, response: Response) -> MeOut:
         raise HTTPException(401, "用户名或密码错误")
     response.set_cookie(
         COOKIE,
-        _serializer(request).dumps(str(user.id)),
+        _serializer(request).dumps([str(user.id), user.session_version]),
         max_age=MAX_AGE_S,
         httponly=True,
         samesite="lax",
@@ -64,7 +65,13 @@ async def login(body: LoginIn, request: Request, response: Response) -> MeOut:
 
 
 @router.post("/auth/logout", status_code=204)
-async def logout(response: Response) -> None:
+async def logout(request: Request, response: Response) -> None:
+    try:
+        user = await current_user(request)
+    except HTTPException:
+        user = None  # no valid session: only the cookie needs clearing
+    if user is not None:
+        await end_sessions(request.app.state.deps.engine, user.id)
     response.delete_cookie(COOKIE)
 
 

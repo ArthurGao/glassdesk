@@ -6,7 +6,18 @@ from typing import Literal
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
-from sqlalchemy import Column, DateTime, MetaData, Table, Text, func, insert, select
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    Table,
+    Text,
+    func,
+    insert,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -22,6 +33,7 @@ users = Table(
     Column("username", Text, nullable=False),
     Column("password_hash", Text, nullable=False),
     Column("role", Text, nullable=False),
+    Column("session_version", Integer, nullable=False, server_default="0"),
     Column("created_at", DateTime(timezone=True), server_default=func.now()),
 )
 
@@ -35,6 +47,7 @@ class User:
     id: uuid.UUID
     username: str
     role: Role
+    session_version: int = 0
 
 
 class DuplicateUser(Exception):
@@ -42,7 +55,12 @@ class DuplicateUser(Exception):
 
 
 def _user(row: object) -> User:
-    return User(id=row.id, username=row.username, role=row.role)  # type: ignore[attr-defined]
+    return User(
+        id=row.id,  # type: ignore[attr-defined]
+        username=row.username,  # type: ignore[attr-defined]
+        role=row.role,  # type: ignore[attr-defined]
+        session_version=row.session_version,  # type: ignore[attr-defined]
+    )
 
 
 async def create_user(engine: AsyncEngine, username: str, password: str, role: Role) -> User:
@@ -75,3 +93,13 @@ async def get_user(engine: AsyncEngine, user_id: uuid.UUID) -> User | None:
     async with engine.connect() as conn:
         row = (await conn.execute(select(users).where(users.c.id == user_id))).first()
     return _user(row) if row else None
+
+
+async def end_sessions(engine: AsyncEngine, user_id: uuid.UUID) -> None:
+    """Invalidate every session cookie issued to this user so far (logout, password change)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            update(users)
+            .where(users.c.id == user_id)
+            .values(session_version=users.c.session_version + 1)
+        )

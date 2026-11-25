@@ -80,3 +80,14 @@ async def test_cli_user_create_rejects_duplicate_username(
     async with engine.connect() as conn:
         rows = (await conn.execute(text("select role from users where username='alice'"))).all()
     assert [r.role for r in rows] == ["reviewer"]
+
+
+async def test_a_cookie_copied_before_logout_is_rejected_after_it(
+    client: AsyncClient, engine: AsyncEngine
+) -> None:
+    await create_user(engine, "alice", "correct horse", "member")
+    await client.post("/api/auth/login", json={"username": "alice", "password": "correct horse"})
+    stolen = client.cookies["glassdesk_session"]
+    assert (await client.post("/api/auth/logout")).status_code == 204
+    client.cookies.set("glassdesk_session", stolen)
+    assert (await client.get("/api/me")).status_code == 401
