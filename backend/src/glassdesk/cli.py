@@ -18,6 +18,11 @@ def _parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="run the API (and the built SPA when static_dir is set)")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8740)
+    serve.add_argument(
+        "--fake",
+        action="store_true",
+        help="a scripted model and a fixed demo knowledge base (demos without a model, e2e)",
+    )
     sub.add_parser("openapi", help="print the OpenAPI document as JSON")
     sub.add_parser("migrate", help="create or upgrade the app's and lite-agent's tables")
     user = sub.add_parser("user", help="manage local accounts").add_subparsers(
@@ -39,7 +44,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         from glassdesk.app import create_app
 
-        uvicorn.run(create_app(Settings()), host=args.host, port=args.port)
+        settings = Settings()
+        deps = _fake_deps(settings) if args.fake else None
+        uvicorn.run(create_app(settings, deps=deps), host=args.host, port=args.port)
         return 0
     if args.command == "openapi":
         print(json.dumps(_openapi(), indent=2, ensure_ascii=False))
@@ -81,6 +88,17 @@ async def run(argv: Sequence[str] | None, *, deps: Deps | None = None) -> int:
             from glassdesk.app import close_deps
 
             await close_deps(deps)
+
+
+def _fake_deps(settings: Settings) -> Deps:
+    from dataclasses import replace
+
+    from glassdesk.app import build_deps
+    from glassdesk.fakes import DEMO_PASSAGES, demo_model
+    from glassdesk.testing import FakeSteward
+
+    real = build_deps(settings.model_copy(update={"llm": None}))
+    return replace(real, model=demo_model(), steward=FakeSteward(DEMO_PASSAGES))
 
 
 def _openapi() -> dict[str, object]:

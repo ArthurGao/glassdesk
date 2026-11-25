@@ -2,9 +2,12 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.routing import APIRoute
+from fastapi.staticfiles import StaticFiles
 from lite_agent.pg import PgSessionStore
 from lite_model import RolePolicy, RoleSpec, build_async
 
@@ -68,4 +71,18 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(conversations.router)
+    if settings.static_dir is not None:
+        _serve_spa(app, settings.static_dir)
     return app
+
+
+def _serve_spa(app: FastAPI, root: Path) -> None:
+    """The built SPA: its assets, and index.html for every other non-API path (client routes)."""
+    index = root / "index.html"
+    app.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(404, "Not Found")
+        return FileResponse(index)
