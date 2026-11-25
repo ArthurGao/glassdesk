@@ -1,0 +1,15 @@
+.git
+.superpowers
+**/.venv
+**/node_modules
+**/__pycache__
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+**/.env
+**/.env.*
+deploy
+docs

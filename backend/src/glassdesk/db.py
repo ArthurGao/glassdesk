@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from glassdesk.steward import StewardPort
 
-MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
+# inside the package, so an installed wheel (the image) carries them
+MIGRATIONS = Path(__file__).resolve().parent / "migrations"
 
 
 def sync_url(url: str) -> str:

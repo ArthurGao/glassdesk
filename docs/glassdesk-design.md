@@ -246,3 +246,16 @@ high 关键词规则，使三条写入路径在同一套配置下都能触发（
   改主意或来回切换会把同一个人算多次（推送前的安全审查发现可以借此刷"待复审"）。改主意只记在 glassdesk 里；
   steward 那边保留第一次的评价。要准确需要 steward 按 (retrieval, item, user) 存一条（跨 repo，以后再说）。
 - 收尾中修掉：上一个回答刚出现、run 还没放开会话时提问会被 409（提问最多等 3 秒）。
+
+### G4（2026-11-25，分支 `feat/g4`）
+
+- 完成：品牌配置（`GLASSDESK_BRAND_NAME / _COLOR / _WELCOME / _EXAMPLES`，公开接口 `/api/branding`，外壳、登录页、
+  空聊天页的欢迎语和示例问题；颜色只接受 `#RRGGBB`）；`glassdesk seed --demo`（"示例科技"6 条知识，标题带"[演示]"，
+  可重复运行）；`serve --proxy-headers`；镜像（前端构建一次，由 backend 托管；迁移文件放进包里，安装后的包也带着）；
+  `deploy/`：compose（PostgreSQL 三个库、steward 与 lite-rag 按固定 commit 从 GitHub 构建、Ollama 在 `ollama` profile，
+  也可用宿主机的 Ollama）、`init-db.sh`、`steward-ns.yaml`（高风险关键词）、`bootstrap.sh`（一次性初始化：密钥、
+  lite-rag key、steward 命名空间与 key、管理员账号）、中文部署文档。
+- 与设计的偏差：steward 镜像不含 lite-rag，所以 lite-rag 是单独的服务（steward 经 HTTP 连它）；steward 必须打开
+  `STEWARD_KB_LLM`，否则不出确认卡片、拒绝建议（422）；演示数据没有"清除"命令（本端口没有停用条目的接口），文档写了做法。
+- 验证：glassdesk 镜像已构建并检查（迁移文件、前端静态文件在镜像里）；compose 配置能解析。**整套从零部署（bootstrap.sh）
+  还没跑**：它会启动整套长期运行的服务，需要 owner 确认（见交付说明）。

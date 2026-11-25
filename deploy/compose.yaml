@@ -1,0 +1,110 @@
+# One customer, one stack (design §8): glassdesk + llm-steward (lite-rag KB, lite-mem memory) +
+# PostgreSQL + Ollama. Run deploy/bootstrap.sh once; afterwards `docker compose up -d`.
+#
+# Models: by default the bundled Ollama (`--profile ollama`, models pulled by bootstrap.sh). To
+# use an Ollama the machine already runs, set OLLAMA_URL=http://host.docker.internal:11434 in .env
+# and leave the profile out.
+#
+# Only glassdesk is published, on the host's loopback (put a TLS proxy in front for other users:
+# README). steward, lite-rag, PostgreSQL and Ollama are reachable inside this network only.
+name: ${COMPOSE_PROJECT_NAME:-glassdesk}
+
+x-ollama-env: &ollama-env
+  OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run bootstrap.sh}
+      GLASSDESK_DB_PASSWORD: ${GLASSDESK_DB_PASSWORD:?run bootstrap.sh}
+      STEWARD_DB_PASSWORD: ${STEWARD_DB_PASSWORD:?run bootstrap.sh}
+      LITERAG_DB_PASSWORD: ${LITERAG_DB_PASSWORD:?run bootstrap.sh}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-databases.sh:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.40.15
+    profiles: [ollama]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+  lite-rag:
+    build: https://github.com/ArthurGao/lite-rag.git#1672e1a4af5d9167f933ebf81a6219971d3d5973
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      LITERAG_DATABASE_URL: postgresql://lite_rag:${LITERAG_DB_PASSWORD}@db:5432/lite_rag
+      # [] until bootstrap.sh creates steward's key; lite-rag refuses to serve without one
+      LITERAG_SERVER__KEYS: ${LITERAG_SERVER__KEYS:-[]}
+      LITERAG_EMBEDDING__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}
+      LITERAG_LLM__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
+      LITERAG_LLM__REASONING_EFFORT: none
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    restart: unless-stopped
+
+  steward:
+    build: https://github.com/ArthurGao/llm-steward.git#e5cb7ba8e098f8c2554d38df677419544ca71d4a:backend
+    depends_on:
+      db: {condition: service_healthy}
+      lite-rag: {condition: service_started}
+    environment:
+      STEWARD_DATABASE_URL: postgresql+asyncpg://steward:${STEWARD_DB_PASSWORD}@db:5432/steward
+      STEWARD_ADMIN_TOKEN: ${STEWARD_ADMIN_TOKEN:?run bootstrap.sh}
+      # knowledge: lite-rag over HTTP; memory: lite-mem inside steward (schema lite_mem)
+      STEWARD_KB_PROVIDER: literag
+      STEWARD_LITERAG_URL: http://lite-rag:8700
+      STEWARD_LITERAG_API_KEY: ${STEWARD_LITERAG_API_KEY:-}
+      STEWARD_MEMORY_PROVIDER: litemem
+      STEWARD_LITEMEM_MODE: inprocess
+      LITEMEM_EMBEDDING__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}
+      LITEMEM_LLM__BACKENDS__OPENAI__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
+      LITEMEM_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
+      # the KB pipeline's model steps (risk, worthiness, drafting): without them steward makes
+      # no confirmation cards and refuses suggestions (422)
+      STEWARD_KB_LLM: "true"
+      STEWARD_LLM: '{"backend": "ollama", "model": "${CHAT_MODEL:-qwen3:8b}", "backends": {"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}}'
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - steward-state:/data
+    restart: unless-stopped
+
+  glassdesk:
+    build: ..
+    depends_on:
+      db: {condition: service_healthy}
+      steward: {condition: service_healthy}
+    environment:
+      GLASSDESK_DATABASE_URL: postgresql+psycopg://glassdesk:${GLASSDESK_DB_PASSWORD}@db:5432/glassdesk
+      GLASSDESK_SESSION_SECRET: ${GLASSDESK_SESSION_SECRET:?run bootstrap.sh}
+      GLASSDESK_STEWARD_URL: http://steward:8600
+      GLASSDESK_STEWARD_API_KEY: ${GLASSDESK_STEWARD_API_KEY:-unset-until-bootstrap}
+      GLASSDESK_STEWARD_NAMESPACE: glassdesk
+      GLASSDESK_STEWARD_ADMIN_TOKEN: ${STEWARD_ADMIN_TOKEN}
+      GLASSDESK_LLM__BACKEND: ollama
+      GLASSDESK_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
+      GLASSDESK_LLM__BACKENDS: '{"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}'
+      GLASSDESK_TIMEZONE: ${TIMEZONE:-Asia/Shanghai}
+      GLASSDESK_BRAND_NAME: ${BRAND_NAME:-glassdesk}
+      GLASSDESK_BRAND_COLOR: ${BRAND_COLOR:-#0f172a}
+      GLASSDESK_BRAND_WELCOME: ${BRAND_WELCOME:-}
+      GLASSDESK_BRAND_EXAMPLES: ${BRAND_EXAMPLES:-[]}
+      # behind a TLS-terminating proxy: --proxy-headers (README)
+      GLASSDESK_SERVE_FLAGS: ${GLASSDESK_SERVE_FLAGS:-}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports:
+      - "127.0.0.1:${GLASSDESK_PORT:-8740}:8740"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  ollama:
+  steward-state:

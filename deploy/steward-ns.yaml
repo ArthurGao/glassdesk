@@ -1,0 +1,6 @@
+# The deployment's steward namespace (applied by bootstrap.sh: `steward ns apply -f`). Edit the
+# keywords for the customer: an entry, suggestion or document title containing one goes to the
+# review queue, never live on its own.
+slug: glassdesk
+kb:
+  high_risk_keywords: [价格, 报价, 政策, 法务, 合同, 医疗, 安全]
