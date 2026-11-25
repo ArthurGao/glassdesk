@@ -4,6 +4,7 @@ day, the helpful rate, and steward's view of the KB.
 Unknown is not zero (KB dates-time-and-metrics §4): a run whose endpoint reported no cost is
 left out of the cost sum and counted apart; unrated answers leave the helpful-rate denominator."""
 
+import asyncio
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,7 @@ from sqlalchemy import Date, case, cast, func, select
 from glassdesk.auth import Reviewer
 from glassdesk.conversations import answer_feedback, run_usage
 from glassdesk.db import Deps
+from glassdesk.steward import KbStats, StewardUnavailable
 
 DAYS = 7
 
@@ -63,6 +65,16 @@ def _day(
     )
 
 
+async def _kb_stats(deps: Deps) -> KbStats | None:
+    """None when steward's Admin API is not configured or does not answer: the rest stands."""
+    if deps.steward is None:
+        return None
+    try:
+        return await deps.steward.stats()
+    except StewardUnavailable:
+        return None
+
+
 @router.get("")
 async def insights(request: Request, user: Reviewer) -> InsightsOut:
     deps: Deps = request.app.state.deps
@@ -72,6 +84,8 @@ async def insights(request: Request, user: Reviewer) -> InsightsOut:
     since = datetime.combine(first, time.min, tzinfo=tz)
     local_day = cast(func.timezone(tz.key, run_usage.c.finished_at), Date)
     known = run_usage.c.cost_usd.is_not(None)
+    # steward's numbers come over HTTP: ask while the database is read
+    stats_call = asyncio.create_task(_kb_stats(deps))
     async with deps.engine.connect() as conn:
         rows = (
             await conn.execute(
@@ -79,12 +93,9 @@ async def insights(request: Request, user: Reviewer) -> InsightsOut:
                     local_day.label("day"),
                     func.count().label("answers"),
                     func.count().filter(run_usage.c.failed).label("failed"),
-                    func.coalesce(
-                        func.sum(
-                            func.coalesce(run_usage.c.input_tokens, 0)
-                            + func.coalesce(run_usage.c.output_tokens, 0)
-                        ),
-                        0,
+                    func.sum(
+                        func.coalesce(run_usage.c.input_tokens, 0)
+                        + func.coalesce(run_usage.c.output_tokens, 0)
                     ).label("tokens"),
                     func.count().filter(known).label("known"),
                     func.sum(run_usage.c.cost_usd).label("cost"),
@@ -127,7 +138,7 @@ async def insights(request: Request, user: Reviewer) -> InsightsOut:
         known_total,
         round(sum(d.cost_usd or 0.0 for d in days), 6) if known_total else None,
     )
-    stats = await deps.steward.stats() if deps.steward is not None else None
+    stats = await stats_call
     kb = (
         KbOut(
             entries_by_status=stats.entries_by_status,

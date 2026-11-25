@@ -375,8 +375,8 @@ class HttpSteward:
         await _call("feedback", self._client.feedback(retrieval_id, item_id, helpful=helpful))
 
     async def stats(self) -> KbStats | None:
-        """The namespace's KB numbers from steward's Admin API; None when it is not configured or
-        does not answer (insights then show the rest)."""
+        """The namespace's KB numbers from steward's Admin API; None when it is not configured.
+        Unreachable or malformed: StewardUnavailable, like every other call."""
         if self._admin is None:
             return None
         try:
@@ -391,4 +391,4 @@ class HttpSteward:
             )
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             log.warning("steward stats failed: %s", type(exc).__name__)
-            return None
+            raise StewardUnavailable(type(exc).__name__) from None

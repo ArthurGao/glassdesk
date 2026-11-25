@@ -312,7 +312,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FeedbackIn"
+                "$ref": "#/components/schemas/Feedback"
               }
             }
           }
@@ -323,7 +323,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeedbackOut"
+                  "$ref": "#/components/schemas/Feedback"
                 }
               }
             }
@@ -1264,7 +1264,7 @@
         ],
         "title": "EntryOut"
       },
-      "FeedbackIn": {
+      "Feedback": {
         "properties": {
           "helpful": {
             "type": "boolean",
@@ -1275,20 +1275,7 @@
         "required": [
           "helpful"
         ],
-        "title": "FeedbackIn"
-      },
-      "FeedbackOut": {
-        "properties": {
-          "helpful": {
-            "type": "boolean",
-            "title": "Helpful"
-          }
-        },
-        "type": "object",
-        "required": [
-          "helpful"
-        ],
-        "title": "FeedbackOut"
+        "title": "Feedback"
       },
       "Gap": {
         "properties": {

@@ -1,6 +1,7 @@
 """Test doubles for the boundaries glassdesk does not own (also used by `serve --fake`)."""
 
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -199,11 +200,8 @@ class FakeSteward:
         self.feedbacks.append((retrieval_id, item_id, helpful))
 
     async def stats(self) -> KbStats | None:
-        if self.fail:
-            return None
-        by_status: dict[str, int] = {}
-        for e in self.entries:
-            by_status[e.status] = by_status.get(e.status, 0) + 1
+        self._check()
+        by_status = dict(Counter(e.status for e in self.entries))
         pending = [c for c in self.candidates if c.status == "pending"]
         return KbStats(
             entries_by_status=by_status,

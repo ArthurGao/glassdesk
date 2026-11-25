@@ -10,13 +10,11 @@ import {
   uploadDocument,
 } from '@/client/sdk.gen'
 import { isSettled } from '@/lib/api'
+import { ENTRY_STATUS } from '@/lib/labels'
 import { meQuery } from '@/lib/session'
 import { kbKeys } from './keys'
 
 
-const ENTRY_STATUS: Record<string, string> = {
-  draft: '草稿', active: '生效', verified: '已验证', deprecated: '已停用', rejected: '已拒绝',
-}
 const DOC_STATUS: Record<string, string> = {
   pending: '等待处理', processing: '处理中', ready: '可检索', failed: '处理失败',
 }

@@ -30,7 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from glassdesk.agent import build_agent
 from glassdesk.auth import CurrentUser
@@ -149,17 +149,17 @@ async def _events(deps: Deps, session_id: str | None, after_seq: int = 0) -> Seq
         return []
 
 
-async def _passages(engine: AsyncEngine, conversation_id: uuid.UUID) -> dict[int, Passage]:
-    """The conversation's numbered passages: what `[n]` in any of its answers refers to."""
-    async with engine.connect() as conn:
-        rows = (
-            await conn.execute(
-                select(run_passages.c.n, run_passages.c.passage).where(
-                    run_passages.c.conversation_id == conversation_id
-                )
-            )
-        ).all()
-    return {r.n: Passage(**r.passage) for r in rows}
+async def _passages(
+    conn: AsyncConnection, conversation_id: uuid.UUID
+) -> dict[int, tuple[Passage, str | None]]:
+    """The conversation's numbered passages, with the steward retrieval each came from: what
+    `[n]` in any of its answers refers to, and what feedback on it is reported under."""
+    rows = await conn.execute(
+        select(run_passages.c.n, run_passages.c.passage, run_passages.c.retrieval_id).where(
+            run_passages.c.conversation_id == conversation_id
+        )
+    )
+    return {r.n: (Passage(**r.passage), r.retrieval_id) for r in rows}
 
 
 async def _next_citation_number(engine: AsyncEngine, conversation_id: uuid.UUID) -> int:
@@ -194,8 +194,8 @@ async def _answers(
         runs = runs[-1:]
     if not runs:
         return []
-    passages = await _passages(engine, conversation_id)
     async with engine.connect() as conn:
+        passages = {n: p for n, (p, _) in (await _passages(conn, conversation_id)).items()}
         rated = {
             r.run_id: r.helpful
             for r in await conn.execute(
@@ -371,18 +371,14 @@ async def get_answers(conv: Owned, request: Request) -> list[Answer]:
     )
 
 
-class FeedbackIn(BaseModel):
-    helpful: bool
-
-
-class FeedbackOut(BaseModel):
+class Feedback(BaseModel):
     helpful: bool
 
 
 @router.post("/{conversation_id}/answers/{run_id}/feedback")
 async def rate_answer(
-    run_id: str, body: FeedbackIn, conv: Owned, request: Request, user: CurrentUser
-) -> FeedbackOut:
+    run_id: str, body: Feedback, conv: Owned, request: Request, user: CurrentUser
+) -> Feedback:
     """The user's verdict on one answer: kept here (one per user, the latest wins) and passed to
     steward for every item the answer cited, best effort."""
     deps = _deps(request)
@@ -408,26 +404,23 @@ async def rate_answer(
         )
     if previous == body.helpful:
         # steward flags entries for review from these counts: a repeat must not count again
-        return FeedbackOut(helpful=body.helpful)
+        return body
     if deps.steward is not None and answer.citations:
         async with deps.engine.connect() as conn:
-            retrieval_of = {
-                r.n: r.retrieval_id
-                for r in await conn.execute(
-                    select(run_passages.c.n, run_passages.c.retrieval_id).where(
-                        run_passages.c.conversation_id == conv.id,
-                        run_passages.c.n.in_([c.n for c in answer.citations]),
-                    )
-                )
-            }
-        for c in answer.citations:
-            if retrieval_of.get(c.n) is None:
-                continue
-            try:
-                await deps.steward.feedback(retrieval_of[c.n], c.item_id, helpful=body.helpful)
-            except Exception:
-                log.warning("feedback to steward for run %s failed", run_id, exc_info=True)
-    return FeedbackOut(helpful=body.helpful)
+            numbered = await _passages(conn, conv.id)
+        # one verdict per (retrieval, item), sent together; a failure is only logged
+        targets = {
+            (retrieval_id, c.item_id)
+            for c in answer.citations
+            if (retrieval_id := numbered.get(c.n, (None, None))[1]) is not None
+        }
+        results = await asyncio.gather(
+            *(deps.steward.feedback(r, i, helpful=body.helpful) for r, i in targets),
+            return_exceptions=True,
+        )
+        for failed in (r for r in results if isinstance(r, BaseException)):
+            log.warning("feedback to steward for run %s failed: %s", run_id, type(failed).__name__)
+    return body
 
 
 @router.get("/{conversation_id}/stream", response_class=EventSourceResponse)

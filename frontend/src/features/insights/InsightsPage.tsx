@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { insights } from '@/client/sdk.gen'
 import type { DayOut } from '@/client/types.gen'
+import { ENTRY_STATUS } from '@/lib/labels'
+import { insightsKeys } from './keys'
 
 /** Unknown cost is never 0: all unknown shows "unknown"; some unknown shows the known sum and how
  * many runs did not report one. */
@@ -10,13 +12,10 @@ function cost(d: DayOut): string {
   return d.cost_unknown_runs ? known + '（' + d.cost_unknown_runs + ' 次未知）' : known
 }
 
-const STATUS: Record<string, string> = {
-  draft: '草稿', active: '生效', verified: '已验证', deprecated: '已停用', rejected: '已拒绝',
-}
 
 export function InsightsPage() {
   const query = useQuery({
-    queryKey: ['insights'],
+    queryKey: insightsKeys.all,
     queryFn: async () => {
       const { data, response } = await insights()
       if (response?.status === 403) return 'forbidden' as const
@@ -71,7 +70,7 @@ export function InsightsPage() {
         {body.kb ? (
           <>
             <p className="text-slate-600">
-              {Object.entries(body.kb.entries_by_status).map(([s, n]) => (STATUS[s] ?? s) + ' ' + n).join(' · ')}
+              {Object.entries(body.kb.entries_by_status).map(([s, n]) => (ENTRY_STATUS[s] ?? s) + ' ' + n).join(' · ')}
               {' · '}<span>待审核 {body.kb.pending_reviews}</span>{' · '}待确认 {body.kb.awaiting_user}
             </p>
             <h3 className="text-slate-500">知识库缺什么（检索不到好结果的问题）</h3>

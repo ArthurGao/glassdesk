@@ -313,19 +313,9 @@ export type EntryOut = {
 };
 
 /**
- * FeedbackIn
+ * Feedback
  */
-export type FeedbackIn = {
-    /**
-     * Helpful
-     */
-    helpful: boolean;
-};
-
-/**
- * FeedbackOut
- */
-export type FeedbackOut = {
+export type Feedback = {
     /**
      * Helpful
      */
@@ -777,7 +767,7 @@ export type GetAnswersResponses = {
 export type GetAnswersResponse = GetAnswersResponses[keyof GetAnswersResponses];
 
 export type RateAnswerData = {
-    body: FeedbackIn;
+    body: Feedback;
     path: {
         /**
          * Run Id
@@ -805,7 +795,7 @@ export type RateAnswerResponses = {
     /**
      * Successful Response
      */
-    200: FeedbackOut;
+    200: Feedback;
 };
 
 export type RateAnswerResponse = RateAnswerResponses[keyof RateAnswerResponses];
