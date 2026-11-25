@@ -11,6 +11,7 @@ from glassdesk.steward import (
     Decision,
     Document,
     Entry,
+    KbStats,
     Passage,
     SearchResult,
     StewardRejected,
@@ -196,3 +197,18 @@ class FakeSteward:
     async def feedback(self, retrieval_id: str, item_id: str, *, helpful: bool) -> None:
         self._check()
         self.feedbacks.append((retrieval_id, item_id, helpful))
+
+    async def stats(self) -> KbStats | None:
+        if self.fail:
+            return None
+        by_status: dict[str, int] = {}
+        for e in self.entries:
+            by_status[e.status] = by_status.get(e.status, 0) + 1
+        pending = [c for c in self.candidates if c.status == "pending"]
+        return KbStats(
+            entries_by_status=by_status,
+            pending_reviews=sum(c.stage == "awaiting_review" for c in pending),
+            awaiting_user=sum(c.stage == "awaiting_user" for c in pending),
+            gaps=[("海外差旅住宿标准", 3), ("年假可以跨年吗", 2)],
+            demo=True,
+        )

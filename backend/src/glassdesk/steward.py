@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+import httpx
 from llm_steward_client import AsyncSteward, StewardError
 from llm_steward_client import _models as m
 
@@ -82,6 +83,15 @@ class Written:
 
 
 @dataclass(frozen=True)
+class KbStats:
+    entries_by_status: dict[str, int]
+    pending_reviews: int
+    awaiting_user: int
+    gaps: list[tuple[str, int]]  # (question, how often) that found nothing good
+    demo: bool = False  # made-up numbers (fake mode)
+
+
+@dataclass(frozen=True)
 class Decision:
     candidate: Candidate
     entry: Entry | None  # the entry an accepted team decision made live
@@ -113,6 +123,7 @@ class StewardPort(Protocol):
     ) -> list[Candidate]: ...
     async def suggest(self, text: str, *, user_id: str, session_id: str) -> Written: ...
     async def feedback(self, retrieval_id: str, item_id: str, *, helpful: bool) -> None: ...
+    async def stats(self) -> KbStats | None: ...
     async def list_candidates(
         self, *, stage: str, user_id: str | None = None
     ) -> list[Candidate]: ...
@@ -194,10 +205,13 @@ async def _call[T](what: str, call: Awaitable[T]) -> T:
 class HttpSteward:
     @classmethod
     def from_settings(cls, settings: "Settings") -> "HttpSteward":
+        admin = settings.steward_admin_token
         return cls(
             settings.steward_url,
             settings.steward_api_key.get_secret_value(),
             collection=settings.steward_collection,
+            admin_token=admin.get_secret_value() if admin else None,
+            namespace=settings.steward_namespace,
         )
 
     def __init__(
@@ -208,18 +222,31 @@ class HttpSteward:
         collection: str = "company",
         timeout_s: float = 10.0,
         model_timeout_s: float = 60.0,
+        admin_token: str | None = None,
+        namespace: str | None = None,
     ) -> None:
         # One attempt: the agent's tool call or the page is where a failure becomes visible.
         self._client = AsyncSteward(base_url, api_key, timeout=timeout_s, max_retries=0)
         # Episodes and suggestions run a model on steward's side (extraction, drafting).
         self._model_client = AsyncSteward(base_url, api_key, timeout=model_timeout_s, max_retries=0)
         self._collection_name = collection
+        # The Admin API takes a static bearer token (server-side only, never sent to a browser).
+        self._admin: httpx.AsyncClient | None = None
+        if admin_token and namespace:
+            self._admin = httpx.AsyncClient(
+                base_url=base_url,
+                timeout=timeout_s,
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            self._namespace = namespace
         self._collection_id: str | None = None
         self._resolving = asyncio.Lock()
 
     async def aclose(self) -> None:
         await self._client.aclose()
         await self._model_client.aclose()
+        if self._admin is not None:
+            await self._admin.aclose()
 
     async def search(self, query: str, *, user_id: str, session_id: str) -> SearchResult:
         out = await _call(
@@ -346,3 +373,22 @@ class HttpSteward:
         """A person's verdict on one item a retrieval returned (steward flags entries for review
         from these)."""
         await _call("feedback", self._client.feedback(retrieval_id, item_id, helpful=helpful))
+
+    async def stats(self) -> KbStats | None:
+        """The namespace's KB numbers from steward's Admin API; None when it is not configured or
+        does not answer (insights then show the rest)."""
+        if self._admin is None:
+            return None
+        try:
+            response = await self._admin.get(f"/admin/v1/ns/{self._namespace}/stats")
+            response.raise_for_status()
+            data = response.json()
+            return KbStats(
+                entries_by_status=dict(data["kb_entries"]),
+                pending_reviews=int(data["pending_reviews"]),
+                awaiting_user=int(data["awaiting_user"]),
+                gaps=[(g["query"], int(g["count"])) for g in data["gaps"]],
+            )
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            log.warning("steward stats failed: %s", type(exc).__name__)
+            return None

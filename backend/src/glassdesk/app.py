@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -11,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from lite_agent.pg import PgSessionStore
 from lite_model import RolePolicy, RoleSpec, build_async
 
-from glassdesk import auth, conversations, kb, suggestions
+from glassdesk import auth, conversations, insights, kb, suggestions
 from glassdesk.agent import ROLE
 from glassdesk.config import Settings
 from glassdesk.db import Deps, make_engine, sync_url
@@ -65,6 +66,7 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.deps = deps if deps is not None else build_deps(settings)
     app.state.runs = Runs()
+    app.state.clock = lambda: datetime.now(UTC)  # tests pin it
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
@@ -75,6 +77,7 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(suggestions.router)
     app.include_router(kb.router)
+    app.include_router(insights.router)
     if settings.static_dir is not None:
         _serve_spa(app, settings.static_dir)
     return app

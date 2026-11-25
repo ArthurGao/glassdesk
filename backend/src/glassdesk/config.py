@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     steward_url: str = "http://127.0.0.1:8600"
     steward_api_key: SecretStr  # scopes read, write and review (design §5, §7)
     steward_collection: str = "company"
+    # steward's Admin API (insights: KB gaps and counts); both unset: insights show "未配置"
+    steward_admin_token: SecretStr | None = None
+    steward_namespace: str | None = None
+    timezone: str = "Asia/Shanghai"  # the deployment's local days, for insights
     session_secret: SecretStr = Field(min_length=32)
     brand_name: str = "glassdesk"
     static_dir: Path | None = None
