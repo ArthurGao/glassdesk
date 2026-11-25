@@ -137,3 +137,43 @@ async def test_fake_governance_follows_steward_defaults() -> None:
     with pytest.raises(StewardRejected):
         await fake.decide(card.id, True, user_id="u1", scope="team")
     assert await fake.list_candidates(stage="awaiting_user", user_id="u1") == []
+
+
+@respx.mock
+async def test_list_candidates_follows_every_page(steward: HttpSteward) -> None:
+    first, second = candidate_json(), candidate_json()
+    cursor = str(uuid.uuid4())
+
+    def page(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("cursor") == cursor:
+            return httpx.Response(200, json={"items": [second], "next_cursor": None})
+        return httpx.Response(200, json={"items": [first], "next_cursor": cursor})
+
+    route = respx.get(f"{BASE}/v1/candidates").mock(side_effect=page)
+    found = await steward.list_candidates(stage="awaiting_review")
+    assert [c.id for c in found] == [first["id"], second["id"]]
+    assert route.call_count == 2
+
+
+@respx.mock
+async def test_extraction_gets_more_time_than_a_search() -> None:
+    """Episodes and suggestions are model calls on steward's side: a short timeout would drop
+    the cards silently."""
+    import asyncio
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.3)
+        return httpx.Response(
+            200,
+            json={
+                "episode_id": str(uuid.uuid4()),
+                "status": "processed",
+                "job_id": None,
+                "memories": [],
+                "suggestions": [],
+            },
+        )
+
+    respx.post(f"{BASE}/v1/episodes").mock(side_effect=slow)
+    steward = HttpSteward(BASE, "stw_k", timeout_s=0.1, model_timeout_s=2.0)
+    assert await steward.report_episode([("user", "q")], user_id="u1", session_id="s1") == []

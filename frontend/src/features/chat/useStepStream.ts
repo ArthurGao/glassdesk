@@ -52,7 +52,7 @@ class StepStream {
       const step = JSON.parse(e.data) as Step
       this.steps.set(step.seq, step)
       if (e.lastEventId) this.cursor = Math.max(this.cursor, Number(e.lastEventId))
-      this.publish(true)
+      this.publish(this.snapshot.streaming) // a step never re-locks a run that has answered
     })
     es.addEventListener('answer', (e: MessageEvent<string>) => {
       const answer = JSON.parse(e.data) as Answer
@@ -60,12 +60,19 @@ class StepStream {
         ...prev.filter((a) => a.run_id !== answer.run_id),
         answer,
       ])
+      // answered: the user may ask again while steward still reads the episode (cards, end)
+      this.publish(false)
     })
     es.addEventListener('suggestions', (e: MessageEvent<string>) => {
-      this.queryClient.setQueryData<CardOut[]>(chatKeys.suggestions, JSON.parse(e.data) as CardOut[])
+      const cards = JSON.parse(e.data) as CardOut[]
+      // a fetch of the cards still in flight is older than this push: it must not overwrite it
+      void this.queryClient
+        .cancelQueries({ queryKey: chatKeys.suggestions })
+        .then(() => this.queryClient.setQueryData<CardOut[]>(chatKeys.suggestions, cards))
     })
     es.addEventListener('failed', (e: MessageEvent<string>) => {
       this.problem = (JSON.parse(e.data) as { message: string }).message
+      this.publish(false)
     })
     es.addEventListener('error', () => {
       // A dropped connection is retried by the browser (CONNECTING); a refused one (401, 502)

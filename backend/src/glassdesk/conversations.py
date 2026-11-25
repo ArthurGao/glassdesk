@@ -142,8 +142,14 @@ async def _answers(
     events: Sequence[Event],
     *,
     last_only: bool = False,
+    finished_after: int | None = None,
 ) -> list[Answer]:
-    runs = [e.run_id for e in events if isinstance(e, RunFinished)]
+    """Answers of the finished runs: all, the last only, or those that finished after a seq."""
+    runs = [
+        e.run_id
+        for e in events
+        if isinstance(e, RunFinished) and (finished_after is None or e.seq > finished_after)
+    ]
     if last_only:
         runs = runs[-1:]
     if not runs:
@@ -316,11 +322,10 @@ async def stream(
         for at, step in changes(events, cursor):
             yield ServerSentEvent(data=step, event="step", id=str(at))
             cursor = at
-        if any(isinstance(e, RunFinished) and e.seq > start for e in events):
-            answer = await _answers(deps.engine, conv.id, events, last_only=True)
-            if answer:
-                yield ServerSentEvent(data=answer[0], event="answer")
-                answered = True
+        # every run that finished since the last read, in order (several after a reconnect)
+        for answer in await _answers(deps.engine, conv.id, events, finished_after=start):
+            yield ServerSentEvent(data=answer, event="answer")
+            answered = True
         if not going:
             break
         await asyncio.sleep(POLL_S)

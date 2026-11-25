@@ -243,3 +243,26 @@ async def test_a_run_that_could_not_finish_is_reported_on_the_stream(
     messages = parse_sse((await client.get(f"/api/conversations/{conv_id}/stream")).text)
     assert [m[0] for m in messages] == ["failed", "end"]
     assert messages[0][2] == {"run_id": run_id, "message": "这次回答没有完成，请重试。"}
+
+
+async def test_a_stream_resumed_after_two_runs_sends_both_answers(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    client = await client_for(make_app(search_then_answer("一[1]", "二[2]")), engine, "alice")
+    conv_id, first = await ask(client, "第一问")
+    full = parse_sse((await client.get(f"/api/conversations/{conv_id}/stream")).text)
+    question_step = next(m for m in full if m[0] == "step" and m[2]["kind"] == "question")
+    second = (
+        await client.post(f"/api/conversations/{conv_id}/messages", json={"text": "第二问"})
+    ).json()["run_id"]
+    await client.get(f"/api/conversations/{conv_id}/stream")
+    # a client that dropped right after the first question comes back after both runs ended
+    resumed = parse_sse(
+        (
+            await client.get(
+                f"/api/conversations/{conv_id}/stream",
+                headers={"Last-Event-ID": str(question_step[1])},
+            )
+        ).text
+    )
+    assert [m[2]["run_id"] for m in resumed if m[0] == "answer"] == [first, second]

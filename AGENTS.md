@@ -21,7 +21,8 @@ docs/      design and plans
 
 1. Never import `llm_steward`; only `llm_steward_client.AsyncSteward` over HTTP.
 2. Every LLM call goes through a lite-model role (`desk.answer`); no model id in code.
-3. Agent tools only read or propose; no tool writes an effective KB entry.
+3. Agent tools only read or propose: no tool writes a KB entry itself. A proposal is a steward
+   suggestion, and steward's policy decides whether it goes live (low risk may), waits for the user or for review.
 4. The timeline never exposes the system prompt, provenance URLs, keys or upstream error text.
 5. Tests never call a real LLM, a real steward, Ollama or llm-gateway (`AsyncFakeModel`, `FakeSteward`).
 6. Unknown cost is `null` in the API and "未知" in the UI, never 0.
@@ -39,4 +40,5 @@ backend `127.0.0.1:8740`, frontend dev `8741`, e2e preview `8742`, e2e backend (
 
 ## Current stage
 
-G0 + G1 (2026-11-25): skeleton and the first vertical slice (ask → search → cited answer, live timeline).
+G2 (2026-11-25): knowledge into the KB — episode cards, `propose_knowledge`, manual entries and uploads, review queue.
+G0 + G1 done 2026-11-25 (merged): skeleton, ask → search → cited answer, live timeline.

@@ -200,16 +200,25 @@ class HttpSteward:
         )
 
     def __init__(
-        self, base_url: str, api_key: str, *, collection: str = "company", timeout_s: float = 10.0
+        self,
+        base_url: str,
+        api_key: str,
+        *,
+        collection: str = "company",
+        timeout_s: float = 10.0,
+        model_timeout_s: float = 60.0,
     ) -> None:
         # One attempt: the agent's tool call or the page is where a failure becomes visible.
         self._client = AsyncSteward(base_url, api_key, timeout=timeout_s, max_retries=0)
+        # Episodes and suggestions run a model on steward's side (extraction, drafting).
+        self._model_client = AsyncSteward(base_url, api_key, timeout=model_timeout_s, max_retries=0)
         self._collection_name = collection
         self._collection_id: str | None = None
         self._resolving = asyncio.Lock()
 
     async def aclose(self) -> None:
         await self._client.aclose()
+        await self._model_client.aclose()
 
     async def search(self, query: str, *, user_id: str, session_id: str) -> SearchResult:
         out = await _call(
@@ -283,7 +292,7 @@ class HttpSteward:
         """One question and its answer; steward extracts, scores and returns new cards."""
         out = await _call(
             "episode",
-            self._client.episodes.add(
+            self._model_client.episodes.add(
                 [{"role": role, "content": text} for role, text in messages],
                 user_id=user_id,
                 session_id=session_id,
@@ -295,17 +304,27 @@ class HttpSteward:
     async def suggest(self, text: str, *, user_id: str, session_id: str) -> Written:
         col = await self.ensure_collection()
         out = await _call(
-            "suggest", self._client.suggest(col, text, user_id=user_id, session_id=session_id)
+            "suggest",
+            self._model_client.suggest(col, text, user_id=user_id, session_id=session_id),
         )
         return _written(out)
 
     async def list_candidates(self, *, stage: str, user_id: str | None = None) -> list[Candidate]:
-        """Pending candidates at `stage` (first page), the user's own when `user_id` is given."""
-        filters: dict[str, str] = {"stage": stage, "status": "pending"}
-        if user_id is not None:
-            filters["user_id"] = user_id
-        page = await _call("candidates", self._client.candidates.list(**filters))
-        return [_candidate(c) for c in page.items]
+        """Every pending candidate at `stage`, the user's own when `user_id` is given: the
+        ownership and queue checks rely on the list being whole, so all pages are read."""
+        found: list[Candidate] = []
+        cursor: str | None = None
+        while True:
+            page = await _call(
+                "candidates",
+                self._client.candidates.list(
+                    stage=stage, status="pending", user_id=user_id, cursor=cursor
+                ),
+            )
+            found.extend(_candidate(c) for c in page.items)
+            if page.next_cursor is None:
+                return found
+            cursor = str(page.next_cursor)
 
     async def decide(
         self,

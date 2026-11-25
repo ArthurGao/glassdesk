@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import type { Answer, CardOut, Step } from '@/client/types.gen'
 import { MockEventSource } from '@/test/eventSource'
 import { renderApp } from '@/test/render'
@@ -179,13 +179,23 @@ const CARD: CardOut = { id: 'k1', title: '报销时限', content: '报销要在 
 
 test('a card from the stream asks whether to keep the knowledge', async () => {
   api()
+  // the page's own fetch of open cards answers late, after the stream pushed one: it must not
+  // wipe the pushed card out
+  server.use(
+    http.get('*/api/suggestions', async () => {
+      await delay(100)
+      return HttpResponse.json([])
+    }),
+  )
   renderApp('/?c=c1')
   await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
   act(() => {
     MockEventSource.last().emit('suggestions', [CARD])
     MockEventSource.last().emit('end', {})
   })
-  const card = await screen.findByRole('region', { name: '要不要存进知识库？' })
+  await screen.findByRole('region', { name: '要不要存进知识库？' })
+  await act(() => delay(200)) // the late fetch has answered by now
+  const card = screen.getByRole('region', { name: '要不要存进知识库？' })
   expect(card).toHaveTextContent('报销要在 30 天内提交')
   expect(within(card).getByRole('button', { name: '存为团队知识' })).toBeInTheDocument()
   expect(within(card).getByRole('button', { name: '只给我' })).toBeInTheDocument()
@@ -221,4 +231,17 @@ test('a card someone already decided (409) just goes away', async () => {
   await userEvent.setup().click(await screen.findByRole('button', { name: '不要' }))
   await waitFor(() => expect(screen.queryByRole('region', { name: '要不要存进知识库？' })).toBeNull())
   expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test('Send unlocks with the answer, while steward is still reading the episode', async () => {
+  api()
+  renderApp('/?c=c1')
+  await openIdle()
+  await ask('报销上限是多少？')
+  await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+  await userEvent.setup().type(screen.getByLabelText('问题'), '下一个')
+  expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+  act(() => MockEventSource.last().emit('answer', { ...ANSWER, run_id: 'r2' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  expect(MockEventSource.last().closed).toBe(false) // still listening for cards and end
 })
