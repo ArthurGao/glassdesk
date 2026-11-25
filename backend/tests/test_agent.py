@@ -123,3 +123,70 @@ async def test_steward_down_gives_error_tool_result_and_run_completes() -> None:
     assert res.is_error is True
     assert res.content == "StewardUnavailable: ConnectError"
     assert recorded.seen == []
+
+
+def propose_then_answer(title: str, content: str) -> AsyncFakeModel:
+    call = ToolCall(
+        "p1", "propose_knowledge", {"title": title, "content": content, "reason": "用户要求"}
+    )
+    return AsyncFakeModel(**{ROLE: [AssistantTurn((call,)), AssistantTurn((Text("好的"),))]})
+
+
+async def test_the_agent_offers_search_and_propose() -> None:
+    agent = build_agent(
+        model=AsyncFakeModel(),
+        sessions=InMemorySessionStore(),
+        steward=FakeSteward(),
+        user_id="u1",
+        brand_name="Acme",
+        on_passages=Recorded(),
+    )
+    assert [t.name for t in agent.tools] == ["search_knowledge", "propose_knowledge"]
+    assert "propose_knowledge" in agent.system
+
+
+async def test_propose_becomes_a_card_for_the_user() -> None:
+    steward, sessions = FakeSteward(), InMemorySessionStore()
+    agent = build_agent(
+        model=propose_then_answer("报销时限", "30 天内提交"),
+        sessions=sessions,
+        steward=steward,
+        user_id="u1",
+        brand_name="Acme",
+        on_passages=Recorded(),
+    )
+    result = await agent.run("记住报销时限")
+    [res] = await tool_results(sessions, result.session_id)
+    assert (res.is_error, res.content) == (False, "已提交，等待你确认。")
+    [card] = steward.candidates
+    assert (card.title, card.content, card.requested_for_user) == ("报销时限", "30 天内提交", "u1")
+
+
+async def test_a_high_risk_proposal_waits_for_review() -> None:
+    sessions = InMemorySessionStore()
+    agent = build_agent(
+        model=propose_then_answer("新价格", "A 套餐 99 元"),
+        sessions=sessions,
+        steward=FakeSteward(),
+        user_id="u1",
+        brand_name="Acme",
+        on_passages=Recorded(),
+    )
+    result = await agent.run("记住新价格")
+    [res] = await tool_results(sessions, result.session_id)
+    assert res.content == "已提交，等待审核。"
+
+
+async def test_a_proposal_when_steward_is_down_is_an_error_result() -> None:
+    sessions = InMemorySessionStore()
+    agent = build_agent(
+        model=propose_then_answer("t", "c"),
+        sessions=sessions,
+        steward=FakeSteward(fail=True),
+        user_id="u1",
+        brand_name="Acme",
+        on_passages=Recorded(),
+    )
+    result = await agent.run("记住")
+    [res] = await tool_results(sessions, result.session_id)
+    assert (res.is_error, result.outcome) == (True, "completed")

@@ -174,3 +174,24 @@ def test_a_failed_run_has_a_failed_answer() -> None:
     answer = project_answer(events, {}, "r1")
     assert answer is not None
     assert (answer.failed, answer.text) == (True, "")
+
+
+def test_a_proposal_step_shows_its_title_and_outcome() -> None:
+    events: list[Event] = [
+        RunStarted(role="desk.answer", system="s", tools=(), **env(2)),
+        ToolStarted(
+            call_id="p1",
+            name="propose_knowledge",
+            arguments={"title": "报销时限", "content": "30 天", "reason": ""},
+            **env(3),
+        ),
+        ToolResultEvent(
+            call_id="p1",
+            content="已提交，等待你确认。",
+            executed=True,
+            original_chars=10,
+            **env(4, ms=100),
+        ),
+    ]
+    [step] = project_steps(events)
+    assert (step.title, step.detail, step.status) == ("提议存入知识库", "“报销时限” → 待确认", "ok")

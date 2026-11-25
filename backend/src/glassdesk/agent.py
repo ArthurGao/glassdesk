@@ -18,14 +18,29 @@ SYSTEM = """你是{brand}的知识助手。回答员工的问题时：
 - 引用时在句子后写 [编号]，编号必须与搜索结果里的编号完全一致；不要编造来源或编号。
 - 搜索结果里没有相关内容时，直接说没有找到，不要猜测。
 - 搜索失败时，告诉用户知识库暂时不可用。
+- 用户明确陈述或确认了一条值得团队长期使用的知识时，用 propose_knowledge 提议存入知识库；
+  不要提议你自己的推测，也不要提议搜索结果里已经有的内容。
 - 用用户提问的语言回答，简洁明了。"""
 
 # (call id, [(citation number, passage), …]): what the page resolves `[n]` against
+# What propose_knowledge tells the model; the timeline reads the outcome back from it.
+PROPOSED = {
+    "awaiting_user": "已提交，等待你确认。",
+    "awaiting_review": "已提交，等待审核。",
+    "entry": "已存入知识库。",
+}
+
 OnPassages = Callable[[str, Sequence[tuple[int, Passage]]], Awaitable[None]]
 
 
 class SearchArgs(BaseModel):
     query: str = Field(min_length=1, max_length=500, description="要搜索的问题或关键词")
+
+
+class ProposeArgs(BaseModel):
+    title: str = Field(min_length=1, max_length=120, description="知识的标题")
+    content: str = Field(min_length=1, max_length=2000, description="知识的完整内容，写成通用表述")
+    reason: str = Field(default="", max_length=300, description="为什么值得存入")
 
 
 def format_passages(passages: Sequence[Passage], degraded: Sequence[str], *, start: int = 1) -> str:
@@ -60,11 +75,21 @@ def build_agent(
         await on_passages(ctx.call_id, list(enumerate(result.passages, start=start)))
         return format_passages(result.passages, result.degraded, start=start)
 
+    @tool(description="提议把一条知识存入公司知识库。是否生效由知识库的审核规则决定。")
+    async def propose_knowledge(args: ProposeArgs, ctx: ToolContext) -> str:
+        written = await steward.suggest(
+            f"{args.title}\n{args.content}", user_id=user_id, session_id=ctx.session_id
+        )
+        if written.entry is not None:
+            return PROPOSED["entry"]
+        stage = written.candidate.stage if written.candidate else "awaiting_review"
+        return PROPOSED[stage]
+
     return Agent(
         role=ROLE,
         model=model,
         system=SYSTEM.format(brand=brand_name),
-        tools=(search_knowledge,),
+        tools=(search_knowledge, propose_knowledge),
         sessions=sessions,
         # Session-wide (lite-agent sums the whole log): a long conversation must not run out.
         budget=Budget(turns=200),

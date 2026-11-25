@@ -22,12 +22,13 @@ from lite_agent.events import (
 )
 from pydantic import BaseModel
 
-from glassdesk.agent import PARTIAL
+from glassdesk.agent import PARTIAL, PROPOSED
 from glassdesk.steward import Passage
 
 StepKind = Literal["question", "thinking", "tool", "answer", "error", "finished"]
 StepStatus = Literal["running", "ok", "error"]
-TOOL_TITLES = {"search_knowledge": "搜索知识库"}
+TOOL_TITLES = {"search_knowledge": "搜索知识库", "propose_knowledge": "提议存入知识库"}
+_PROPOSAL_OUTCOME = dict(zip(PROPOSED.values(), ("待确认", "待审核", "已存入"), strict=True))
 _NUMBERED = re.compile(r"^\[\d+\] ", re.MULTILINE)
 _MARKER = re.compile(r"\[(\d+)\]")
 
@@ -91,6 +92,12 @@ def _clip(text: str, limit: int = 200) -> str:
 
 
 def _tool_detail(start: ToolStarted, result: ToolResultEvent | None) -> str | None:
+    if start.name == "propose_knowledge":
+        title = f"“{_clip(str(start.arguments.get('title', '')), 80)}”"
+        if result is None:
+            return title
+        outcome = "失败" if result.is_error else _PROPOSAL_OUTCOME.get(result.content, "已提交")
+        return f"{title} → {outcome}"
     query = start.arguments.get("query")
     head = f"“{_clip(str(query), 80)}”" if query is not None else None
     if result is None:
