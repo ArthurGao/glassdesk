@@ -6,7 +6,7 @@ import uuid
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import asdict
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -24,12 +24,13 @@ from sqlalchemy import (
     Text,
     func,
     insert,
+    literal_column,
     select,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.engine import Row
+from sqlalchemy.engine import CursorResult, Row
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from glassdesk.agent import build_agent
@@ -378,19 +379,22 @@ class Feedback(BaseModel):
 async def save_rating(
     conn: AsyncConnection, run_id: str, user_id: uuid.UUID, helpful: bool
 ) -> bool:
-    """Store the user's rating; True when it is new or changed (steward must hear of it).
+    """Store the user's rating (the latest wins here); True only for their first rating of this
+    answer, the one steward hears. steward adds every verdict it gets and cannot replace one, so
+    a change of mind or a repeat would count the same person again.
 
-    One statement decides: a second first rating racing this one waits on the unique key, then
-    finds the same value and writes nothing, so only one of them reports a change."""
+    One statement decides: a second first rating racing this one waits on the unique key and
+    then takes the update path, so only one of them reports the insert."""
     stmt = pg_insert(answer_feedback).values(run_id=run_id, user_id=user_id, helpful=helpful)
-    written = await conn.execute(
+    written: CursorResult[Any] = await conn.execute(
         stmt.on_conflict_do_update(
             index_elements=["run_id", "user_id"],
             set_={"helpful": stmt.excluded.helpful, "updated_at": func.now()},
             where=answer_feedback.c.helpful.is_distinct_from(stmt.excluded.helpful),
-        ).returning(answer_feedback.c.run_id)
+        ).returning(literal_column("xmax = 0").label("inserted"))
     )
-    return written.first() is not None
+    row = written.first()
+    return row is not None and bool(row.inserted)
 
 
 @router.post("/{conversation_id}/answers/{run_id}/feedback")
@@ -408,7 +412,7 @@ async def rate_answer(
     async with deps.engine.begin() as conn:
         changed = await save_rating(conn, run_id, user.id, body.helpful)
     if not changed:
-        # steward flags entries for review from these counts: a repeat must not count again
+        # only a first rating reaches steward (see save_rating): its review flags count people
         return body
     if deps.steward is not None and answer.citations:
         async with deps.engine.connect() as conn:

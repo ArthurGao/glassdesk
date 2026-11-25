@@ -15,7 +15,7 @@ async def answered(client, text_: str = "报销上限？") -> tuple[str, str]:  
     return conv_id, run_id
 
 
-async def test_changing_a_rating_keeps_one_row_and_tells_steward_each_time(
+async def test_changing_a_rating_keeps_one_row_and_tells_steward_only_the_first(
     make_app: Callable[..., FastAPI], engine: AsyncEngine
 ) -> None:
     steward = FakeSteward([P1])
@@ -27,7 +27,8 @@ async def test_changing_a_rating_keeps_one_row_and_tells_steward_each_time(
     async with engine.connect() as conn:
         rows = (await conn.execute(text("select helpful from answer_feedback"))).all()
     assert [r.helpful for r in rows] == [False]
-    assert steward.feedbacks == [("fake-1", "e1", True), ("fake-1", "e1", False)]
+    # steward adds every verdict it hears: a flip would count the same person twice
+    assert steward.feedbacks == [("fake-1", "e1", True)]
     [answer] = (await client.get(f"/api/conversations/{conv_id}/answers")).json()
     assert answer["feedback"] is False
 
@@ -151,3 +152,15 @@ async def test_save_rating_says_changed_once_when_two_first_ratings_race(
         second_changed = await second
         await b.commit()
     assert (first, second_changed) == (True, False)
+
+
+async def test_flipping_back_and_forth_tells_steward_once(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    steward = FakeSteward([P1])
+    client = await client_for(make_app(search_then_answer("800 元[1]"), steward), engine, "alice")
+    conv_id, run_id = await answered(client)
+    url = f"/api/conversations/{conv_id}/answers/{run_id}/feedback"
+    for helpful in (False, True, False, True, False):
+        assert (await client.post(url, json={"helpful": helpful})).json() == {"helpful": helpful}
+    assert steward.feedbacks == [("fake-1", "e1", False)]
