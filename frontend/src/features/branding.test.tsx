@@ -17,6 +17,7 @@ test('the shell shows the customer name from the branding', async () => {
   renderApp('/')
   expect(await screen.findByText('Acme 知识台')).toBeInTheDocument()
   expect(screen.queryByText('glassdesk')).toBeNull()
+  expect(document.title).toBe('Acme 知识台')
 })
 
 test('the login page carries the customer name', async () => {

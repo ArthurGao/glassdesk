@@ -8,6 +8,7 @@ def make_settings() -> Settings:
     return Settings(
         database_url="postgresql+psycopg://u:p@localhost:5432/glassdesk",
         steward_api_key="stw_test_key",
+        steward_review_key="stw_test_review",
         session_secret="s" * 32,
     )
 

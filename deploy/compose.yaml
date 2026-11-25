@@ -46,13 +46,16 @@ services:
       # [] until bootstrap.sh creates steward's key; lite-rag refuses to serve without one
       LITERAG_SERVER__KEYS: ${LITERAG_SERVER__KEYS:-[]}
       LITERAG_EMBEDDING__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}
-      LITERAG_LLM__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
+      # lite-model settings (lite-rag S15): a backend's base_url lives under llm.backends.<name>
+      LITERAG_LLM__BACKEND: ollama
+      LITERAG_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
+      LITERAG_LLM__BACKENDS: '{"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}'
       LITERAG_LLM__REASONING_EFFORT: none
     extra_hosts: ["host.docker.internal:host-gateway"]
     restart: unless-stopped
 
   steward:
-    build: https://github.com/ArthurGao/llm-steward.git#e5cb7ba8e098f8c2554d38df677419544ca71d4a:backend
+    build: https://github.com/ArthurGao/llm-steward.git#53c45e5f84e02ca68aac2d56d940d639758da709:backend
     depends_on:
       db: {condition: service_healthy}
       lite-rag: {condition: service_started}
@@ -65,13 +68,16 @@ services:
       STEWARD_LITERAG_API_KEY: ${STEWARD_LITERAG_API_KEY:-}
       STEWARD_MEMORY_PROVIDER: litemem
       STEWARD_LITEMEM_MODE: inprocess
-      LITEMEM_EMBEDDING__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}
+      # lite-model settings (lite-mem S14): the embed backend's OpenAI-compatible root
+      LITEMEM_EMBEDDING__BACKENDS__OLLAMA__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
       LITEMEM_LLM__BACKENDS__OPENAI__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
       LITEMEM_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
+      LITEMEM_LLM__REASONING_EFFORT: none
       # the KB pipeline's model steps (risk, worthiness, drafting): without them steward makes
       # no confirmation cards and refuses suggestions (422)
       STEWARD_KB_LLM: "true"
-      STEWARD_LLM: '{"backend": "ollama", "model": "${CHAT_MODEL:-qwen3:8b}", "backends": {"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}}'
+      # thinking off: qwen3 thinks in English and then drafted Chinese knowledge in English
+      STEWARD_LLM: '{"backend": "ollama", "model": "${CHAT_MODEL:-qwen3:8b}", "reasoning_effort": "none", "backends": {"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}}'
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - steward-state:/data
@@ -86,7 +92,9 @@ services:
       GLASSDESK_DATABASE_URL: postgresql+psycopg://glassdesk:${GLASSDESK_DB_PASSWORD}@db:5432/glassdesk
       GLASSDESK_SESSION_SECRET: ${GLASSDESK_SESSION_SECRET:?run bootstrap.sh}
       GLASSDESK_STEWARD_URL: http://steward:8600
+      # read/write for everything people do; the review key for reviewing only (design §7)
       GLASSDESK_STEWARD_API_KEY: ${GLASSDESK_STEWARD_API_KEY:-unset-until-bootstrap}
+      GLASSDESK_STEWARD_REVIEW_KEY: ${GLASSDESK_STEWARD_REVIEW_KEY:-unset-until-bootstrap}
       GLASSDESK_STEWARD_NAMESPACE: glassdesk
       GLASSDESK_STEWARD_ADMIN_TOKEN: ${STEWARD_ADMIN_TOKEN}
       GLASSDESK_LLM__BACKEND: ollama

@@ -29,7 +29,7 @@ def item(**over: object) -> dict[str, object]:
 
 @pytest.fixture
 async def steward() -> HttpSteward:
-    return HttpSteward(BASE, "stw_k", timeout_s=0.2)
+    return HttpSteward(BASE, "stw_k", "stw_r", timeout_s=0.2)
 
 
 @respx.mock

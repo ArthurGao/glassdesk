@@ -238,7 +238,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "itsdangerous", specifier = ">=2.2" },
     { name = "lite-agent", extras = ["pg"], url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.2.4/lite_agent-0.2.4-py3-none-any.whl" },
-    { name = "llm-steward-client", git = "https://github.com/ArthurGao/llm-steward?subdirectory=sdk%2Fpython&rev=e5cb7ba8e098f8c2554d38df677419544ca71d4a" },
+    { name = "llm-steward-client", git = "https://github.com/ArthurGao/llm-steward?subdirectory=sdk%2Fpython&rev=53c45e5f84e02ca68aac2d56d940d639758da709" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
@@ -511,7 +511,7 @@ provides-extras = ["anthropic"]
 [[package]]
 name = "llm-steward-client"
 version = "0.1.0"
-source = { git = "https://github.com/ArthurGao/llm-steward?subdirectory=sdk%2Fpython&rev=e5cb7ba8e098f8c2554d38df677419544ca71d4a#e5cb7ba8e098f8c2554d38df677419544ca71d4a" }
+source = { git = "https://github.com/ArthurGao/llm-steward?subdirectory=sdk%2Fpython&rev=53c45e5f84e02ca68aac2d56d940d639758da709#53c45e5f84e02ca68aac2d56d940d639758da709" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },

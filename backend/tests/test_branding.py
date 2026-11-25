@@ -32,6 +32,7 @@ def test_a_brand_color_that_is_not_a_hex_color_is_refused() -> None:
         Settings(
             database_url="postgresql+psycopg://u:p@h/d",
             steward_api_key="k",  # type: ignore[arg-type]
+            steward_review_key="r",  # type: ignore[arg-type]
             session_secret="s" * 32,  # type: ignore[arg-type]
             brand_color="red; background: url(x)",
             _env_file=None,  # type: ignore[call-arg]

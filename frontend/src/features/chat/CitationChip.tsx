@@ -1,10 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Answer, Citation } from '@/client/types.gen'
 
 function CitationChip({ citation }: { citation: Citation }) {
   const [open, setOpen] = useState(false)
+  const root = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    const onDown = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [open])
   return (
-    <span className="relative">
+    <span ref={root} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

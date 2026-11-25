@@ -73,14 +73,29 @@ fi
 log "lite-rag and steward"
 compose up -d --wait lite-rag steward
 
+steward_key() {  # steward_key <name> <scope>...: a new key for the namespace, printed once
+  local name="$1" args=() key
+  shift
+  for scope in "$@"; do args+=(--scope "$scope"); done
+  key="$(compose exec -T steward steward key create glassdesk "${args[@]}" --name "$name" | tail -1 | tr -d '\r')"
+  [[ "$key" == stw_* ]] || { echo "unexpected output from steward key create" >&2; exit 1; }
+  printf '%s' "$key"
+}
+
 if [ -z "$(env_get GLASSDESK_STEWARD_API_KEY)" ]; then
-  log "steward namespace, its keyword rules and glassdesk's key (read, write, review)"
+  log "steward namespace, its keyword rules and glassdesk's write key (read, write)"
   compose exec -T steward steward ns create glassdesk --name glassdesk >/dev/null
   compose cp ./steward-ns.yaml steward:/tmp/steward-ns.yaml
   compose exec -T steward steward ns apply -f /tmp/steward-ns.yaml
-  key="$(compose exec -T steward steward key create glassdesk --scope read --scope write --scope review --name glassdesk | tail -1 | tr -d '\r')"
-  [[ "$key" == stw_* ]] || { echo "unexpected output from steward key create"; exit 1; }
+  key="$(steward_key glassdesk read write)"  # an assignment: a failure stops the script
   env_set GLASSDESK_STEWARD_API_KEY "$key"
+fi
+# A separate key for reviewing: steward treats a review-scope key's own writes as reviewed, so
+# what people write must never go through it.
+if [ -z "$(env_get GLASSDESK_STEWARD_REVIEW_KEY)" ]; then
+  log "glassdesk's review key (read, write, review)"
+  key="$(steward_key glassdesk-review read write review)"
+  env_set GLASSDESK_STEWARD_REVIEW_KEY "$key"
 fi
 
 log "glassdesk"

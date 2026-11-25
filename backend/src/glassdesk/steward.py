@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 import httpx
 from llm_steward_client import AsyncSteward, StewardError
 from llm_steward_client import _models as m
+from llm_steward_client._client import AsyncCandidates
 
 if TYPE_CHECKING:
     from glassdesk.config import Settings
@@ -209,6 +210,7 @@ class HttpSteward:
         return cls(
             settings.steward_url,
             settings.steward_api_key.get_secret_value(),
+            settings.steward_review_key.get_secret_value(),
             collection=settings.steward_collection,
             admin_token=admin.get_secret_value() if admin else None,
             namespace=settings.steward_namespace,
@@ -218,6 +220,7 @@ class HttpSteward:
         self,
         base_url: str,
         api_key: str,
+        review_key: str,
         *,
         collection: str = "company",
         timeout_s: float = 10.0,
@@ -229,6 +232,9 @@ class HttpSteward:
         self._client = AsyncSteward(base_url, api_key, timeout=timeout_s, max_retries=0)
         # Episodes and suggestions run a model on steward's side (extraction, drafting).
         self._model_client = AsyncSteward(base_url, api_key, timeout=model_timeout_s, max_retries=0)
+        # Reviewing only: steward lets a review-scope key's own writes skip review, so everything
+        # a person writes goes through the write key above (read, write) and is routed by risk.
+        self._review_client = AsyncSteward(base_url, review_key, timeout=timeout_s, max_retries=0)
         self._collection_name = collection
         # The Admin API takes a static bearer token (server-side only, never sent to a browser).
         self._admin: httpx.AsyncClient | None = None
@@ -242,9 +248,16 @@ class HttpSteward:
         self._collection_id: str | None = None
         self._resolving = asyncio.Lock()
 
+    def _candidates_for(self, user_id: str | None) -> AsyncCandidates:
+        """Candidates as `user_id` (an end user: the write key) or, without one, as a reviewer (the
+        review key). Steward treats the review key's own writes as reviewed, so nothing a person
+        writes may come through it; besides reviewing, it only creates the collection."""
+        return (self._client if user_id is not None else self._review_client).candidates
+
     async def aclose(self) -> None:
         await self._client.aclose()
         await self._model_client.aclose()
+        await self._review_client.aclose()
         if self._admin is not None:
             await self._admin.aclose()
 
@@ -277,9 +290,10 @@ class HttpSteward:
                 page = await _call("collections", self._client.kb.collections.list())
                 found = next((c for c in page.items if c.name == self._collection_name), None)
                 if found is None:
+                    # a collection's review policy is a reviewer's decision (steward)
                     found = await _call(
                         "create collection",
-                        self._client.kb.collections.create(self._collection_name),
+                        self._review_client.kb.collections.create(self._collection_name),
                     )
                 self._collection_id = str(found.id)
             return self._collection_id
@@ -293,7 +307,8 @@ class HttpSteward:
         col = await self.ensure_collection()
         out = await _call(
             "create entry",
-            self._client.kb.entries.create(
+            # steward judges risk and embeds before answering: a model call on its side
+            self._model_client.kb.entries.create(
                 col, title, content, source_refs=[{"type": "glassdesk_user", "id": author}]
             ),
         )
@@ -338,16 +353,16 @@ class HttpSteward:
         return _written(out)
 
     async def list_candidates(self, *, stage: str, user_id: str | None = None) -> list[Candidate]:
-        """Every pending candidate at `stage`, the user's own when `user_id` is given: the
-        ownership and queue checks rely on the list being whole, so all pages are read."""
+        """Every pending candidate at `stage`, the user's own when `user_id` is given (without
+        one: the review queue, read with the review key): the ownership and queue checks rely on
+        the list being whole, so all pages are read."""
+        candidates = self._candidates_for(user_id)
         found: list[Candidate] = []
         cursor: str | None = None
         while True:
             page = await _call(
                 "candidates",
-                self._client.candidates.list(
-                    stage=stage, status="pending", user_id=user_id, cursor=cursor
-                ),
+                candidates.list(stage=stage, status="pending", user_id=user_id, cursor=cursor),
             )
             found.extend(_candidate(c) for c in page.items)
             if page.next_cursor is None:
@@ -363,8 +378,9 @@ class HttpSteward:
         scope: Literal["personal", "team"] | None = None,
         note: str | None = None,
     ) -> Decision:
-        """With `user_id`: that end user answering their card. Without: the key reviewing."""
-        resource = self._client.candidates
+        """With `user_id`: that end user answering their card. Without: a reviewer deciding, with
+        the review key."""
+        resource = self._candidates_for(user_id)
         call = resource.accept if accept else resource.reject
         out = await _call("decide", call(candidate_id, user_id=user_id, scope=scope, note=note))
         return Decision(candidate=_candidate(out), entry=_entry(out.entry) if out.entry else None)

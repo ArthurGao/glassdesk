@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useRef, useState } from 'react'
 import { ask } from '@/client/sdk.gen'
 
 export function Composer({
@@ -14,15 +14,24 @@ export function Composer({
 }) {
   const [text, setText] = useState(initialText)
   const [error, setError] = useState<string | null>(null)
+  // the POST itself, before the stream (`busy`) starts: a ref, so a second Enter in the same
+  // render cannot slip through
+  const sending = useRef(false)
+  const [sendingNow, setSendingNow] = useState(false)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     const question = text.trim()
-    if (!question) return
+    if (!question || busy || sending.current) return
+    sending.current = true
+    setSendingNow(true)
     setError(null)
     const { response } = await ask({
       path: { conversation_id: conversationId },
       body: { text: question },
+    }).finally(() => {
+      sending.current = false
+      setSendingNow(false)
     })
     if (response?.status === 202) {
       setText('')
@@ -32,6 +41,14 @@ export function Composer({
     } else {
       setError('发送失败，请稍后再试')
     }
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition (pinyin) is
+    // the input method's, not a send
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
   }
 
   return (
@@ -48,11 +65,12 @@ export function Composer({
           value={text}
           maxLength={4000}
           onChange={(e) => setText(e.target.value)}
-          placeholder="输入问题…"
+          onKeyDown={onKeyDown}
+          placeholder="输入问题…（Enter 发送，Shift+Enter 换行）"
         />
         <button
           type="submit"
-          disabled={busy || !text.trim()}
+          disabled={busy || sendingNow || !text.trim()}
           className="rounded bg-slate-900 px-4 text-sm text-white disabled:opacity-50"
         >
           发送
