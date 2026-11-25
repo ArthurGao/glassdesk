@@ -51,12 +51,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "openapi":
         print(json.dumps(_openapi(), indent=2, ensure_ascii=False))
         return 0
-    return asyncio.run(run(argv))
+    return asyncio.run(run(args))
 
 
-async def run(argv: Sequence[str] | None, *, deps: Deps | None = None) -> int:
+async def run(args: argparse.Namespace | Sequence[str], *, deps: Deps | None = None) -> int:
     """The commands that touch the database; `deps` lets tests point them at their schema."""
-    args = _parser().parse_args(argv)
+    if not isinstance(args, argparse.Namespace):
+        args = _parser().parse_args(args)
     if args.command == "migrate":
         from glassdesk.db import run_migrations
 

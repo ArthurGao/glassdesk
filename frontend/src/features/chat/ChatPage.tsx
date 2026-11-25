@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createConversation, getAnswers, listConversations } from '@/client/sdk.gen'
 import { AnswerText } from './CitationChip'
 import { Composer } from './Composer'
+import { chatKeys } from './keys'
 import { TimelinePanel } from './TimelinePanel'
 import { useStepStream } from './useStepStream'
 
@@ -11,11 +12,11 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const conversations = useQuery({
-    queryKey: ['conversations'],
+    queryKey: chatKeys.conversations,
     queryFn: async () => (await listConversations({ throwOnError: true })).data,
   })
   const answers = useQuery({
-    queryKey: ['answers', conversationId],
+    queryKey: chatKeys.answers(conversationId),
     queryFn: async () =>
       (await getAnswers({ path: { conversation_id: conversationId! }, throwOnError: true })).data,
     enabled: !!conversationId,
@@ -26,7 +27,7 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
 
   async function onNew() {
     const { data } = await createConversation({ throwOnError: true })
-    await queryClient.invalidateQueries({ queryKey: ['conversations'] })
+    await queryClient.invalidateQueries({ queryKey: chatKeys.conversations })
     await navigate({ to: '/', search: { c: data.id } })
   }
 
@@ -56,14 +57,14 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
             <div className="flex-1 space-y-4 overflow-y-auto p-4 text-sm">
               {answers.data?.map((a) => (
                 <article key={a.run_id} className="space-y-2">
-                  <p className="ml-auto w-fit max-w-[80%] rounded bg-slate-900 px-3 py-2 text-white">{a.question}</p>
+                  <QuestionBubble text={a.question} />
                   <div className="max-w-[80%] rounded border border-slate-200 bg-white px-3 py-2">
                     <AnswerText answer={a} />
                   </div>
                 </article>
               ))}
               {shownPending && (
-                <p className="ml-auto w-fit max-w-[80%] rounded bg-slate-900 px-3 py-2 text-white">{shownPending}</p>
+                <QuestionBubble text={shownPending} />
               )}
             </div>
             <Composer
@@ -82,4 +83,8 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
       <TimelinePanel steps={steps} />
     </div>
   )
+}
+
+function QuestionBubble({ text }: { text: string }) {
+  return <p className="ml-auto w-fit max-w-[80%] rounded bg-slate-900 px-3 py-2 text-white">{text}</p>
 }

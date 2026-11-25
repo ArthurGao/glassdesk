@@ -125,3 +125,17 @@ test('an error step renders as an error and the run still shows its answer', asy
   expect(row).toHaveAttribute('data-status', 'error')
   expect(screen.getByText('知识库暂时不可用。')).toBeInTheDocument()
 })
+
+test('a new question reopens the stream after the newest step already shown', async () => {
+  api()
+  renderApp('/?c=c1')
+  await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+  expect(MockEventSource.last().url).toMatch(/\/stream\?after=0$/)
+  act(() => {
+    MockEventSource.last().emit('step', step({ seq: 8, kind: 'finished', title: '完成' }), '8')
+    MockEventSource.last().emit('end', {})
+  })
+  await ask('下一个问题')
+  await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+  expect(MockEventSource.last().url).toMatch(/\/stream\?after=8$/)
+})

@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, get_args
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
@@ -19,11 +19,12 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.engine import Row
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 Role = Literal["member", "reviewer", "admin"]
-ROLES: tuple[Role, ...] = ("member", "reviewer", "admin")
+ROLES: tuple[Role, ...] = get_args(Role)
 
 metadata = MetaData()
 users = Table(
@@ -54,12 +55,9 @@ class DuplicateUser(Exception):
     pass
 
 
-def _user(row: object) -> User:
+def _user(row: Row[Any]) -> User:
     return User(
-        id=row.id,  # type: ignore[attr-defined]
-        username=row.username,  # type: ignore[attr-defined]
-        role=row.role,  # type: ignore[attr-defined]
-        session_version=row.session_version,  # type: ignore[attr-defined]
+        id=row.id, username=row.username, role=row.role, session_version=row.session_version
     )
 
 

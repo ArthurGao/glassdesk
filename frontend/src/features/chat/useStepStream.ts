@@ -1,6 +1,7 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Answer, Step } from '@/client/types.gen'
+import { chatKeys } from './keys'
 
 type Snapshot = { steps: Step[]; streaming: boolean }
 
@@ -13,6 +14,7 @@ type Snapshot = { steps: Step[]; streaming: boolean }
 class StepStream {
   private source: EventSource | null = null
   private steps = new Map<number, Step>()
+  private cursor = 0 // the newest stream id seen: where a reopened stream picks up
   private snapshot: Snapshot = { steps: [], streaming: false }
   private listeners = new Set<() => void>()
 
@@ -36,24 +38,27 @@ class StepStream {
   open = () => {
     this.source?.close()
     const id = this.conversationId
-    const es = new EventSource(`/api/conversations/${id}/stream`, { withCredentials: true })
+    // after the newest event already shown: reopening for a new question replays nothing
+    const es = new EventSource(`/api/conversations/${id}/stream?after=${this.cursor}`, {
+      withCredentials: true,
+    })
     this.source = es
     es.addEventListener('step', (e: MessageEvent<string>) => {
       const step = JSON.parse(e.data) as Step
       this.steps.set(step.seq, step)
+      if (e.lastEventId) this.cursor = Math.max(this.cursor, Number(e.lastEventId))
       this.publish(true)
     })
     es.addEventListener('answer', (e: MessageEvent<string>) => {
       const answer = JSON.parse(e.data) as Answer
-      this.queryClient.setQueryData<Answer[]>(['answers', id], (prev = []) => [
+      this.queryClient.setQueryData<Answer[]>(chatKeys.answers(id), (prev = []) => [
         ...prev.filter((a) => a.run_id !== answer.run_id),
         answer,
       ])
     })
     es.addEventListener('end', () => {
-      this.close()
-      void this.queryClient.invalidateQueries({ queryKey: ['answers', id] })
-      void this.queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      this.close() // the answer is already in the cache; titles and order may have changed
+      void this.queryClient.invalidateQueries({ queryKey: chatKeys.conversations })
     })
     this.publish(true)
   }

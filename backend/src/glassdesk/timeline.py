@@ -5,7 +5,7 @@ tool arguments beyond the search query."""
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Literal
 
@@ -32,6 +32,9 @@ _MARKER = re.compile(r"\[(\d+)\]")
 
 
 class Usage(BaseModel):
+    """lite-agent's UsageData, copied field by field on purpose: only token counts and cost
+    reach the page, never anything else a future UsageData might carry."""
+
     input: int | None
     output: int | None
     cost_usd: float | None  # None: the endpoint did not say; never shown as 0
@@ -100,8 +103,7 @@ def _tool_detail(start: ToolStarted, result: ToolResultEvent | None) -> str | No
 
 def _project(events: Sequence[Event]) -> list[_Open]:
     steps: list[_Open] = []
-    tools: dict[str, _Open] = {}
-    starts: dict[str, ToolStarted] = {}
+    open_tools: dict[str, tuple[_Open, ToolStarted]] = {}  # call id -> its step and start
     run_started: dict[str, datetime] = {}
     previous: datetime | None = None
 
@@ -149,9 +151,9 @@ def _project(events: Sequence[Event]) -> list[_Open]:
                 status="running",
                 detail=_tool_detail(e, None),
             )
-            tools[e.call_id], starts[e.call_id] = steps[-1], e
-        elif isinstance(e, ToolResultEvent) and e.call_id in tools:
-            opened, start = tools.pop(e.call_id), starts.pop(e.call_id)
+            open_tools[e.call_id] = (steps[-1], e)
+        elif isinstance(e, ToolResultEvent) and e.call_id in open_tools:
+            opened, start = open_tools.pop(e.call_id)
             opened.step = opened.step.model_copy(
                 update={
                     "status": "error" if e.is_error else "ok",
@@ -222,17 +224,8 @@ def project_answer(
         if hit is None:
             unmatched.append(n)
         else:
-            citations.append(
-                Citation(
-                    n=n,
-                    item_id=hit.item_id,
-                    kind=hit.kind,
-                    title=hit.title,
-                    source=hit.source,
-                    text=hit.text,
-                    verified=hit.verified,
-                )
-            )
+            fields = {k: v for k, v in asdict(hit).items() if k != "score"}
+            citations.append(Citation(n=n, **fields))
     return Answer(
         run_id=run_id, question=question, text=text, citations=citations, unmatched=unmatched
     )
