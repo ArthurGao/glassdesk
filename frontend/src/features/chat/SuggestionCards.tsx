@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { acceptCard, listCards, rejectCard } from '@/client/sdk.gen'
 import type { CardOut } from '@/client/types.gen'
+import { isSettled } from '@/lib/api'
 import { chatKeys } from './keys'
 
 /** steward's open confirmation cards for this user: keep for the team, for me, or not at all. */
@@ -10,6 +11,7 @@ export function SuggestionCards() {
   const cards = useQuery({
     queryKey: chatKeys.suggestions,
     queryFn: async () => (await listCards({ throwOnError: true })).data,
+    staleTime: 60_000, // the stream pushes new cards; no refetch on every focus
   })
   const [error, setError] = useState<string | null>(null)
 
@@ -20,8 +22,7 @@ export function SuggestionCards() {
       choice === 'reject'
         ? await rejectCard({ path })
         : await acceptCard({ path, body: { scope: choice } })
-    // decided now, or already decided elsewhere (409) or gone (404): either way it is done
-    if (response?.ok || response?.status === 409 || response?.status === 404) {
+    if (isSettled(response)) {
       queryClient.setQueryData<CardOut[]>(chatKeys.suggestions, (prev = []) =>
         prev.filter((c) => c.id !== card.id),
       )

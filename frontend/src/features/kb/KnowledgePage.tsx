@@ -9,13 +9,10 @@ import {
   reject,
   uploadDocument,
 } from '@/client/sdk.gen'
+import { isSettled } from '@/lib/api'
 import { meQuery } from '@/lib/session'
+import { kbKeys } from './keys'
 
-const kbKeys = {
-  entries: ['kb', 'entries'] as const,
-  documents: ['kb', 'documents'] as const,
-  reviews: ['kb', 'reviews'] as const,
-}
 
 const ENTRY_STATUS: Record<string, string> = {
   draft: '草稿', active: '生效', verified: '已验证', deprecated: '已停用', rejected: '已拒绝',
@@ -78,7 +75,8 @@ function Entries() {
     setTitle('')
     setContent('')
     setOpen(false)
-    await queryClient.invalidateQueries({ queryKey: kbKeys.entries })
+    // a candidate is not an entry yet: the list only changes when one went live
+    if (data.entry) await queryClient.invalidateQueries({ queryKey: kbKeys.entries })
   }
 
   return (
@@ -190,7 +188,7 @@ function Reviews() {
     setError(null)
     const call = ok ? approve : reject
     const { response } = await call({ path: { candidate_id: id }, body: { note: null } })
-    if (!response?.ok && response?.status !== 404 && response?.status !== 409) {
+    if (!isSettled(response)) {
       setError('操作失败，请稍后再试')
       return
     }

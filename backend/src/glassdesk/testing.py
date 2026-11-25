@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from glassdesk.steward import (
-    HIGH_RISK_WORDS,
     Candidate,
     Decision,
     Document,
@@ -18,6 +17,9 @@ from glassdesk.steward import (
     StewardUnavailable,
     Written,
 )
+
+# The fake's stand-in for a steward namespace rule that sends these words to review.
+HIGH_RISK_WORDS = ("价格", "政策", "法务", "医疗", "安全")
 
 
 def _now() -> datetime:

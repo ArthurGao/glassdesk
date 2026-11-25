@@ -1,7 +1,6 @@
 """Local accounts: one deployment, one customer (design §7)."""
 
 import uuid
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
@@ -102,18 +101,3 @@ async def end_sessions(engine: AsyncEngine, user_id: uuid.UUID) -> None:
             .where(users.c.id == user_id)
             .values(session_version=users.c.session_version + 1)
         )
-
-
-def current_role_in(*roles: Role) -> "Callable[..., Awaitable[User]]":
-    """A route dependency: the logged-in user, 403 unless their role is one of `roles`."""
-    from fastapi import HTTPException, Request
-
-    from glassdesk.auth import current_user
-
-    async def check(request: Request) -> User:
-        user = await current_user(request)
-        if user.role not in roles:
-            raise HTTPException(403, "需要审核权限")
-        return user
-
-    return check

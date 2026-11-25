@@ -17,6 +17,7 @@ from glassdesk.config import Settings
 from glassdesk.db import Deps, make_engine, sync_url
 from glassdesk.runs import Runs
 from glassdesk.steward import HttpSteward
+from glassdesk.web import register_steward_errors
 
 
 def _operation_id(route: APIRoute) -> str:
@@ -29,11 +30,7 @@ def build_deps(settings: Settings) -> Deps:
         engine=make_engine(settings.database_url, settings.db_schema),
         model=model,
         sessions=PgSessionStore(sync_url(settings.database_url), schema=settings.agent_schema),
-        steward=HttpSteward(
-            settings.steward_url,
-            settings.steward_api_key.get_secret_value(),
-            collection=settings.steward_collection,
-        ),
+        steward=HttpSteward.from_settings(settings),
     )
 
 
@@ -73,6 +70,7 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    register_steward_errors(app)
     app.include_router(auth.router)
     app.include_router(conversations.router)
     app.include_router(suggestions.router)

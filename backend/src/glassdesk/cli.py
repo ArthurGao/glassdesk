@@ -70,11 +70,7 @@ async def run(args: argparse.Namespace | Sequence[str], *, deps: Deps | None = N
         from glassdesk.steward import HttpSteward
 
         settings = Settings()
-        steward = HttpSteward(
-            settings.steward_url,
-            settings.steward_api_key.get_secret_value(),
-            collection=settings.steward_collection,
-        )
+        steward = HttpSteward.from_settings(settings)
         try:
             print(f"collection {settings.steward_collection}: {await steward.ensure_collection()}")
         finally:

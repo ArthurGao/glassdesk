@@ -4,27 +4,20 @@ Every write is a steward call; what comes back (a live entry or a waiting candid
 it is. glassdesk adds the reviewer role and an audit row, since steward sees one API key."""
 
 import uuid
-from collections.abc import Awaitable
 from datetime import datetime
 from pathlib import PurePath
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import Column, DateTime, Table, Text, func, insert
 from sqlalchemy.dialects.postgresql import UUID
 
-from glassdesk.auth import CurrentUser
+from glassdesk.auth import CurrentUser, Reviewer
 from glassdesk.db import Deps
-from glassdesk.steward import (
-    Candidate,
-    Document,
-    Entry,
-    StewardPort,
-    StewardRejected,
-    StewardUnavailable,
-)
-from glassdesk.users import User, current_role_in, metadata
+from glassdesk.steward import Candidate, Document, Entry
+from glassdesk.users import User, metadata
+from glassdesk.web import DecisionOut, Steward
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 UPLOAD_TYPES = {".pdf", ".docx", ".md", ".txt", ".html"}
@@ -94,11 +87,6 @@ class ReviewIn(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-class DecisionOut(BaseModel):
-    status: str
-    entry_status: str | None
-
-
 def _out[T: BaseModel](model: type[T], value: Entry | Document | Candidate) -> T:
     return model.model_validate(value, from_attributes=True)
 
@@ -107,52 +95,25 @@ def _candidate(c: Candidate | None) -> CandidateOut | None:
     return _out(CandidateOut, c) if c else None
 
 
-def _steward(request: Request) -> StewardPort:
-    deps: Deps = request.app.state.deps
-    if deps.steward is None:
-        raise HTTPException(503, "知识库未配置")
-    return deps.steward
-
-
-async def _call[T](call: Awaitable[T]) -> T:
-    try:
-        result = await call
-    except StewardRejected as exc:
-        raise HTTPException(409 if exc.status == 409 else exc.status, exc.message) from None
-    except StewardUnavailable:
-        raise HTTPException(503, "知识库暂时不可用") from None
-    return result
-
-
-Reviewer = Annotated[User, Depends(current_role_in("reviewer", "admin"))]
-
-
 @router.get("/entries")
-async def list_entries(request: Request, user: CurrentUser) -> list[EntryOut]:
-    entries: list[Entry] = await _call(_steward(request).list_entries())
-    return [_out(EntryOut, e) for e in entries]
+async def list_entries(steward: Steward, user: CurrentUser) -> list[EntryOut]:
+    return [_out(EntryOut, e) for e in await steward.list_entries()]
 
 
 @router.post("/entries", status_code=201)
-async def create_entry(body: EntryIn, request: Request, user: CurrentUser) -> WrittenOut:
-    written = await _call(
-        _steward(request).create_entry(body.title, body.content, author=user.username)
-    )
-    return WrittenOut(
-        entry=_out(EntryOut, written.entry) if written.entry else None,
-        candidate=_candidate(written.candidate),
-    )
+async def create_entry(body: EntryIn, steward: Steward, user: CurrentUser) -> WrittenOut:
+    written = await steward.create_entry(body.title, body.content, author=user.username)
+    return WrittenOut.model_validate(written, from_attributes=True)
 
 
 @router.get("/documents")
-async def list_documents(request: Request, user: CurrentUser) -> list[DocumentOut]:
-    documents: list[Document] = await _call(_steward(request).list_documents())
-    return [_out(DocumentOut, d) for d in documents]
+async def list_documents(steward: Steward, user: CurrentUser) -> list[DocumentOut]:
+    return [_out(DocumentOut, d) for d in await steward.list_documents()]
 
 
 @router.post("/documents", status_code=201)
 async def upload_document(
-    request: Request,
+    steward: Steward,
     user: CurrentUser,
     file: Annotated[UploadFile, File()],
     title: Annotated[str | None, Form(max_length=200)] = None,
@@ -160,43 +121,42 @@ async def upload_document(
     filename = PurePath(file.filename or "").name
     if PurePath(filename).suffix.lower() not in UPLOAD_TYPES:
         raise HTTPException(422, "只支持 PDF、Word、Markdown、TXT、HTML 文件")
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:  # known before reading
+        raise HTTPException(422, "文件不能超过 20 MB")
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if not data:
         raise HTTPException(422, "文件是空的")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(422, "文件不能超过 20 MB")
     mime = file.content_type or "application/octet-stream"
-    document, candidate = await _call(
-        _steward(request).upload_document(filename, data, mime, title=title or None)
-    )
+    document, candidate = await steward.upload_document(filename, data, mime, title=title or None)
     return UploadedOut(document=_out(DocumentOut, document), candidate=_candidate(candidate))
 
 
 @router.get("/reviews")
-async def list_reviews(request: Request, user: Reviewer) -> list[CandidateOut]:
-    queue: list[Candidate] = await _call(_steward(request).list_candidates(stage="awaiting_review"))
-    return [_out(CandidateOut, c) for c in queue]
+async def list_reviews(steward: Steward, user: Reviewer) -> list[CandidateOut]:
+    return [_out(CandidateOut, c) for c in await steward.list_candidates(stage="awaiting_review")]
 
 
 async def _review(
     request: Request,
+    steward: Steward,
     user: User,
     candidate_id: str,
     action: Literal["approve", "reject"],
     note: str | None,
 ) -> DecisionOut:
-    steward = _steward(request)
-    queue: list[Candidate] = await _call(steward.list_candidates(stage="awaiting_review"))
+    # Only what is in the review queue: the key may decide any candidate, including another
+    # user's open card, so the queue is the reviewer's whole reach.
+    queue = await steward.list_candidates(stage="awaiting_review")
     if candidate_id not in {c.id for c in queue}:
         raise HTTPException(404, "no such review")
     # steward records the key as reviewer; the person goes into its note and our audit row
-    decision = await _call(
-        steward.decide(
-            candidate_id,
-            action == "approve",
-            user_id=None,
-            note=f"{user.username}: {note}" if note else user.username,
-        )
+    decision = await steward.decide(
+        candidate_id,
+        action == "approve",
+        user_id=None,
+        note=f"{user.username}: {note}" if note else user.username,
     )
     deps: Deps = request.app.state.deps
     async with deps.engine.begin() as conn:
@@ -209,21 +169,18 @@ async def _review(
                 note=note,
             )
         )
-    return DecisionOut(
-        status=decision.candidate.status,
-        entry_status=decision.entry.status if decision.entry else None,
-    )
+    return DecisionOut.of(decision)
 
 
 @router.post("/reviews/{candidate_id}/approve")
 async def approve(
-    candidate_id: str, body: ReviewIn, request: Request, user: Reviewer
+    candidate_id: str, body: ReviewIn, request: Request, steward: Steward, user: Reviewer
 ) -> DecisionOut:
-    return await _review(request, user, candidate_id, "approve", body.note)
+    return await _review(request, steward, user, candidate_id, "approve", body.note)
 
 
 @router.post("/reviews/{candidate_id}/reject")
 async def reject(
-    candidate_id: str, body: ReviewIn, request: Request, user: Reviewer
+    candidate_id: str, body: ReviewIn, request: Request, steward: Steward, user: Reviewer
 ) -> DecisionOut:
-    return await _review(request, user, candidate_id, "reject", body.note)
+    return await _review(request, steward, user, candidate_id, "reject", body.note)

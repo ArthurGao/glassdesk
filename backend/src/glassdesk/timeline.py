@@ -28,7 +28,7 @@ from glassdesk.steward import Passage
 StepKind = Literal["question", "thinking", "tool", "answer", "error", "finished"]
 StepStatus = Literal["running", "ok", "error"]
 TOOL_TITLES = {"search_knowledge": "搜索知识库", "propose_knowledge": "提议存入知识库"}
-_PROPOSAL_OUTCOME = dict(zip(PROPOSED.values(), ("待确认", "待审核", "已存入"), strict=True))
+_PROPOSAL_OUTCOME = dict(PROPOSED.values())  # model text -> timeline label
 _NUMBERED = re.compile(r"^\[\d+\] ", re.MULTILINE)
 _MARKER = re.compile(r"\[(\d+)\]")
 

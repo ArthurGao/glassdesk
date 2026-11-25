@@ -284,7 +284,7 @@
     "/api/conversations/{conversation_id}/stream": {
       "get": {
         "summary": "Stream",
-        "description": "`step` events (id = a cursor to resume after) while a run goes, then the last `answer`\n(or `failed` for a run that could not finish), then `end`: without it a browser's\nEventSource reconnects when the stream closes.",
+        "description": "`step` events (id = a cursor to resume after) while a run goes; a run's `answer` as soon\nas it finished (steward may still be reading the episode); then `suggestions` (open cards),\n`failed` for a run that could not finish, and `end`: without it a browser's EventSource\nreconnects when the stream closes.",
         "operationId": "stream",
         "parameters": [
           {

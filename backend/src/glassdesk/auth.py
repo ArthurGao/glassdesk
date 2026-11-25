@@ -45,6 +45,15 @@ async def current_user(request: Request) -> User:
 
 CurrentUser = Annotated[User, Depends(current_user)]
 
+
+async def reviewer(user: CurrentUser) -> User:
+    if user.role not in ("reviewer", "admin"):
+        raise HTTPException(403, "需要审核权限")
+    return user
+
+
+Reviewer = Annotated[User, Depends(reviewer)]
+
 router = APIRouter(prefix="/api")
 
 

@@ -39,7 +39,7 @@ def _reply(call: FakeTurnCall) -> AssistantTurn:
     """ "记住…" proposes the fact; any other question is searched and answered citing the first
     passage found."""
     last = call.messages[-1]
-    if isinstance(last, ToolResults) and last.results[0].content in PROPOSED.values():
+    if isinstance(last, ToolResults) and last.results[0].content in dict(PROPOSED.values()):
         return AssistantTurn((Text(f"好的，{last.results[0].content}"),))
     if isinstance(last, ToolResults):
         found = _FIRST.search(last.results[0].content)

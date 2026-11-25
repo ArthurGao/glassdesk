@@ -5,14 +5,16 @@ import logging
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from llm_steward_client import AsyncSteward, StewardError
 from llm_steward_client import _models as m
 
+if TYPE_CHECKING:
+    from glassdesk.config import Settings
+
 log = logging.getLogger(__name__)
 
-HIGH_RISK_WORDS = ("价格", "政策", "法务", "医疗", "安全")  # the fake's rule, mirroring steward's
 _DETAIL_CHARS = 200
 
 
@@ -137,7 +139,7 @@ def _entry(e: m.EntryOut) -> Entry:
     )
 
 
-def _candidate(c: m.CandidateOut) -> Candidate:
+def _candidate(c: m.CandidateOut | m.DecisionOut) -> Candidate:
     draft: dict[str, Any] = c.draft
     return Candidate(
         id=str(c.id),
@@ -150,6 +152,13 @@ def _candidate(c: m.CandidateOut) -> Candidate:
         requested_for_user=c.requested_for_user,
         origin=c.origin,
         created_at=c.created_at,
+    )
+
+
+def _written(out: m.Written) -> Written:
+    return Written(
+        entry=_entry(out.entry) if out.entry else None,
+        candidate=_candidate(out.candidate) if out.candidate else None,
     )
 
 
@@ -182,6 +191,14 @@ async def _call[T](what: str, call: Awaitable[T]) -> T:
 
 
 class HttpSteward:
+    @classmethod
+    def from_settings(cls, settings: "Settings") -> "HttpSteward":
+        return cls(
+            settings.steward_url,
+            settings.steward_api_key.get_secret_value(),
+            collection=settings.steward_collection,
+        )
+
     def __init__(
         self, base_url: str, api_key: str, *, collection: str = "company", timeout_s: float = 10.0
     ) -> None:
@@ -243,10 +260,7 @@ class HttpSteward:
                 col, title, content, source_refs=[{"type": "glassdesk_user", "id": author}]
             ),
         )
-        return Written(
-            entry=_entry(out.entry) if out.entry else None,
-            candidate=_candidate(out.candidate) if out.candidate else None,
-        )
+        return _written(out)
 
     async def list_documents(self) -> list[Document]:
         col = await self.ensure_collection()
@@ -283,10 +297,7 @@ class HttpSteward:
         out = await _call(
             "suggest", self._client.suggest(col, text, user_id=user_id, session_id=session_id)
         )
-        return Written(
-            entry=_entry(out.entry) if out.entry else None,
-            candidate=_candidate(out.candidate) if out.candidate else None,
-        )
+        return _written(out)
 
     async def list_candidates(self, *, stage: str, user_id: str | None = None) -> list[Candidate]:
         """Pending candidates at `stage` (first page), the user's own when `user_id` is given."""
@@ -306,15 +317,7 @@ class HttpSteward:
         note: str | None = None,
     ) -> Decision:
         """With `user_id`: that end user answering their card. Without: the key reviewing."""
-        fields: dict[str, Any] = {}
-        if user_id is not None:
-            fields["user_id"] = user_id
-        if scope is not None:
-            fields["scope"] = scope
-        if note is not None:
-            fields["note"] = note
         resource = self._client.candidates
         call = resource.accept if accept else resource.reject
-        out = await _call("decide", call(candidate_id, **fields))
-        candidate = _candidate(m.CandidateOut.model_validate(out.model_dump(exclude={"entry"})))
-        return Decision(candidate=candidate, entry=_entry(out.entry) if out.entry else None)
+        out = await _call("decide", call(candidate_id, user_id=user_id, scope=scope, note=note))
+        return Decision(candidate=_candidate(out), entry=_entry(out.entry) if out.entry else None)

@@ -23,11 +23,11 @@ SYSTEM = """你是{brand}的知识助手。回答员工的问题时：
 - 用用户提问的语言回答，简洁明了。"""
 
 # (call id, [(citation number, passage), …]): what the page resolves `[n]` against
-# What propose_knowledge tells the model; the timeline reads the outcome back from it.
-PROPOSED = {
-    "awaiting_user": "已提交，等待你确认。",
-    "awaiting_review": "已提交，等待审核。",
-    "entry": "已存入知识库。",
+# propose_knowledge's outcome: (what the model is told, what the timeline shows)
+PROPOSED: dict[str, tuple[str, str]] = {
+    "awaiting_user": ("已提交，等待你确认。", "待确认"),
+    "awaiting_review": ("已提交，等待审核。", "待审核"),
+    "entry": ("已存入知识库。", "已存入"),
 }
 
 OnPassages = Callable[[str, Sequence[tuple[int, Passage]]], Awaitable[None]]
@@ -81,9 +81,9 @@ def build_agent(
             f"{args.title}\n{args.content}", user_id=user_id, session_id=ctx.session_id
         )
         if written.entry is not None:
-            return PROPOSED["entry"]
+            return PROPOSED["entry"][0]
         stage = written.candidate.stage if written.candidate else "awaiting_review"
-        return PROPOSED[stage]
+        return PROPOSED[stage][0]
 
     return Agent(
         role=ROLE,
