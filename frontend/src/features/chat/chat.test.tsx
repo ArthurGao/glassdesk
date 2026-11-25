@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import type { Answer, Step } from '@/client/types.gen'
+import type { Answer, CardOut, Step } from '@/client/types.gen'
 import { MockEventSource } from '@/test/eventSource'
 import { renderApp } from '@/test/render'
 import { server } from '@/test/server'
@@ -26,9 +26,10 @@ const ANSWER: Answer = {
   unmatched: [3],
 }
 
-function api({ answers = [] as Answer[], askStatus = 202 } = {}) {
+function api({ answers = [] as Answer[], askStatus = 202, cards = [] as CardOut[] } = {}) {
   const stored = [...answers]
   server.use(
+    http.get('*/api/suggestions', () => HttpResponse.json(cards)),
     http.get('*/api/me', () => HttpResponse.json({ username: 'alice', role: 'member' })),
     http.get('*/api/conversations', () => HttpResponse.json([CONV])),
     http.get('*/api/conversations/c1/answers', () => HttpResponse.json(stored)),
@@ -172,4 +173,52 @@ test('a failed answer shows a retry note instead of an empty box', async () => {
   renderApp('/?c=c1')
   await openIdle()
   expect(await screen.findByText('这次回答没有完成，请重试。')).toBeInTheDocument()
+})
+
+const CARD: CardOut = { id: 'k1', title: '报销时限', content: '报销要在 30 天内提交', risk_level: 'medium', reason: null }
+
+test('a card from the stream asks whether to keep the knowledge', async () => {
+  api()
+  renderApp('/?c=c1')
+  await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+  act(() => {
+    MockEventSource.last().emit('suggestions', [CARD])
+    MockEventSource.last().emit('end', {})
+  })
+  const card = await screen.findByRole('region', { name: '要不要存进知识库？' })
+  expect(card).toHaveTextContent('报销要在 30 天内提交')
+  expect(within(card).getByRole('button', { name: '存为团队知识' })).toBeInTheDocument()
+  expect(within(card).getByRole('button', { name: '只给我' })).toBeInTheDocument()
+  expect(within(card).getByRole('button', { name: '不要' })).toBeInTheDocument()
+})
+
+test('存为团队知识 accepts for the team and the card goes away', async () => {
+  let sent: unknown = null
+  api({ cards: [CARD] })
+  server.use(
+    http.post('*/api/suggestions/k1/accept', async ({ request }) => {
+      sent = await request.json()
+      return HttpResponse.json({ status: 'accepted', entry_status: 'active' })
+    }),
+  )
+  renderApp('/?c=c1')
+  await openIdle()
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: '存为团队知识' }))
+  await waitFor(() => expect(screen.queryByRole('region', { name: '要不要存进知识库？' })).toBeNull())
+  expect(sent).toEqual({ scope: 'team' })
+})
+
+test('a card someone already decided (409) just goes away', async () => {
+  api({ cards: [CARD] })
+  server.use(
+    http.post('*/api/suggestions/k1/reject', () =>
+      HttpResponse.json({ detail: '已处理' }, { status: 409 }),
+    ),
+  )
+  renderApp('/?c=c1')
+  await openIdle()
+  await userEvent.setup().click(await screen.findByRole('button', { name: '不要' }))
+  await waitFor(() => expect(screen.queryByRole('region', { name: '要不要存进知识库？' })).toBeNull())
+  expect(screen.queryByRole('alert')).toBeNull()
 })

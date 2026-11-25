@@ -2,4 +2,5 @@
 export const chatKeys = {
   conversations: ['conversations'] as const,
   answers: (conversationId: string | undefined) => ['answers', conversationId] as const,
+  suggestions: ['suggestions'] as const,
 }

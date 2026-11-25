@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createConversation, getAnswers, listConversations } from '@/client/sdk.gen'
 import { AnswerText } from './CitationChip'
 import { Composer } from './Composer'
+import { SuggestionCards } from './SuggestionCards'
 import { chatKeys } from './keys'
 import { TimelinePanel } from './TimelinePanel'
 import { useStepStream } from './useStepStream'
@@ -73,6 +74,7 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
                 <QuestionBubble text={shownPending} />
               )}
             </div>
+            <SuggestionCards />
             {problem && (
               <p role="alert" className="mx-3 mb-1 text-sm text-red-600">
                 {problem}

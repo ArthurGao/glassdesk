@@ -5,6 +5,16 @@ export type ClientOptions = {
 };
 
 /**
+ * AcceptIn
+ */
+export type AcceptIn = {
+    /**
+     * Scope
+     */
+    scope?: 'personal' | 'team';
+};
+
+/**
  * Answer
  */
 export type Answer = {
@@ -32,6 +42,84 @@ export type Answer = {
      * Unmatched
      */
     unmatched: Array<number>;
+};
+
+/**
+ * Body_upload_document
+ */
+export type BodyUploadDocument = {
+    /**
+     * File
+     */
+    file: Blob | File;
+    /**
+     * Title
+     */
+    title?: string | null;
+};
+
+/**
+ * CandidateOut
+ */
+export type CandidateOut = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Stage
+     */
+    stage: string;
+    /**
+     * Risk Level
+     */
+    risk_level: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Reason
+     */
+    reason: string | null;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+};
+
+/**
+ * CardOut
+ */
+export type CardOut = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Risk Level
+     */
+    risk_level: string;
+    /**
+     * Reason
+     */
+    reason: string | null;
 };
 
 /**
@@ -91,6 +179,106 @@ export type ConversationOut = {
 };
 
 /**
+ * DecisionOut
+ */
+export type DecisionOut = {
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Entry Status
+     */
+    entry_status: string | null;
+};
+
+/**
+ * DocumentOut
+ */
+export type DocumentOut = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Filename
+     */
+    filename: string;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * State
+     */
+    state: string;
+    /**
+     * Size Bytes
+     */
+    size_bytes: number;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * EntryIn
+ */
+export type EntryIn = {
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Content
+     */
+    content: string;
+};
+
+/**
+ * EntryOut
+ */
+export type EntryOut = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Content
+     */
+    content: string;
+    /**
+     * Status
+     */
+    status: string;
+    /**
+     * Risk Level
+     */
+    risk_level: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Hit Count
+     */
+    hit_count: number | null;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -136,6 +324,16 @@ export type MessageIn = {
      * Text
      */
     text: string;
+};
+
+/**
+ * ReviewIn
+ */
+export type ReviewIn = {
+    /**
+     * Note
+     */
+    note?: string | null;
 };
 
 /**
@@ -188,6 +386,14 @@ export type Step = {
 };
 
 /**
+ * UploadedOut
+ */
+export type UploadedOut = {
+    document: DocumentOut;
+    candidate: CandidateOut | null;
+};
+
+/**
  * Usage
  *
  * lite-agent's UsageData, copied field by field on purpose: only token counts and cost
@@ -234,6 +440,14 @@ export type ValidationError = {
     ctx?: {
         [key: string]: unknown;
     };
+};
+
+/**
+ * WrittenOut
+ */
+export type WrittenOut = {
+    entry: EntryOut | null;
+    candidate: CandidateOut | null;
 };
 
 export type HealthData = {
@@ -484,3 +698,245 @@ export type StreamResponses = {
      */
     200: unknown;
 };
+
+export type ListCardsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/suggestions';
+};
+
+export type ListCardsResponses = {
+    /**
+     * Response List Cards
+     *
+     * Successful Response
+     */
+    200: Array<CardOut>;
+};
+
+export type ListCardsResponse = ListCardsResponses[keyof ListCardsResponses];
+
+export type AcceptCardData = {
+    body: AcceptIn;
+    path: {
+        /**
+         * Card Id
+         */
+        card_id: string;
+    };
+    query?: never;
+    url: '/api/suggestions/{card_id}/accept';
+};
+
+export type AcceptCardErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AcceptCardError = AcceptCardErrors[keyof AcceptCardErrors];
+
+export type AcceptCardResponses = {
+    /**
+     * Successful Response
+     */
+    200: DecisionOut;
+};
+
+export type AcceptCardResponse = AcceptCardResponses[keyof AcceptCardResponses];
+
+export type RejectCardData = {
+    body?: never;
+    path: {
+        /**
+         * Card Id
+         */
+        card_id: string;
+    };
+    query?: never;
+    url: '/api/suggestions/{card_id}/reject';
+};
+
+export type RejectCardErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RejectCardError = RejectCardErrors[keyof RejectCardErrors];
+
+export type RejectCardResponses = {
+    /**
+     * Successful Response
+     */
+    200: DecisionOut;
+};
+
+export type RejectCardResponse = RejectCardResponses[keyof RejectCardResponses];
+
+export type ListEntriesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/kb/entries';
+};
+
+export type ListEntriesResponses = {
+    /**
+     * Response List Entries
+     *
+     * Successful Response
+     */
+    200: Array<EntryOut>;
+};
+
+export type ListEntriesResponse = ListEntriesResponses[keyof ListEntriesResponses];
+
+export type CreateEntryData = {
+    body: EntryIn;
+    path?: never;
+    query?: never;
+    url: '/api/kb/entries';
+};
+
+export type CreateEntryErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type CreateEntryError = CreateEntryErrors[keyof CreateEntryErrors];
+
+export type CreateEntryResponses = {
+    /**
+     * Successful Response
+     */
+    201: WrittenOut;
+};
+
+export type CreateEntryResponse = CreateEntryResponses[keyof CreateEntryResponses];
+
+export type ListDocumentsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/kb/documents';
+};
+
+export type ListDocumentsResponses = {
+    /**
+     * Response List Documents
+     *
+     * Successful Response
+     */
+    200: Array<DocumentOut>;
+};
+
+export type ListDocumentsResponse = ListDocumentsResponses[keyof ListDocumentsResponses];
+
+export type UploadDocumentData = {
+    body: BodyUploadDocument;
+    path?: never;
+    query?: never;
+    url: '/api/kb/documents';
+};
+
+export type UploadDocumentErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type UploadDocumentError = UploadDocumentErrors[keyof UploadDocumentErrors];
+
+export type UploadDocumentResponses = {
+    /**
+     * Successful Response
+     */
+    201: UploadedOut;
+};
+
+export type UploadDocumentResponse = UploadDocumentResponses[keyof UploadDocumentResponses];
+
+export type ListReviewsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/kb/reviews';
+};
+
+export type ListReviewsResponses = {
+    /**
+     * Response List Reviews
+     *
+     * Successful Response
+     */
+    200: Array<CandidateOut>;
+};
+
+export type ListReviewsResponse = ListReviewsResponses[keyof ListReviewsResponses];
+
+export type ApproveData = {
+    body: ReviewIn;
+    path: {
+        /**
+         * Candidate Id
+         */
+        candidate_id: string;
+    };
+    query?: never;
+    url: '/api/kb/reviews/{candidate_id}/approve';
+};
+
+export type ApproveErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ApproveError = ApproveErrors[keyof ApproveErrors];
+
+export type ApproveResponses = {
+    /**
+     * Successful Response
+     */
+    200: DecisionOut;
+};
+
+export type ApproveResponse = ApproveResponses[keyof ApproveResponses];
+
+export type RejectData = {
+    body: ReviewIn;
+    path: {
+        /**
+         * Candidate Id
+         */
+        candidate_id: string;
+    };
+    query?: never;
+    url: '/api/kb/reviews/{candidate_id}/reject';
+};
+
+export type RejectErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type RejectError = RejectErrors[keyof RejectErrors];
+
+export type RejectResponses = {
+    /**
+     * Successful Response
+     */
+    200: DecisionOut;
+};
+
+export type RejectResponse = RejectResponses[keyof RejectResponses];

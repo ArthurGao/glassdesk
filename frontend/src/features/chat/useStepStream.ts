@@ -1,6 +1,6 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
-import type { Answer, Step } from '@/client/types.gen'
+import type { Answer, CardOut, Step } from '@/client/types.gen'
 import { chatKeys } from './keys'
 
 type Snapshot = { steps: Step[]; streaming: boolean; problem: string | null }
@@ -60,6 +60,9 @@ class StepStream {
         ...prev.filter((a) => a.run_id !== answer.run_id),
         answer,
       ])
+    })
+    es.addEventListener('suggestions', (e: MessageEvent<string>) => {
+      this.queryClient.setQueryData<CardOut[]>(chatKeys.suggestions, JSON.parse(e.data) as CardOut[])
     })
     es.addEventListener('failed', (e: MessageEvent<string>) => {
       this.problem = (JSON.parse(e.data) as { message: string }).message
