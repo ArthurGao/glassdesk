@@ -40,5 +40,8 @@ backend `127.0.0.1:8740`, frontend dev `8741`, e2e preview `8742`, e2e backend (
 
 ## Current stage
 
+First real deployment (2026-11-26): `bootstrap.sh` verified from zero on the host's Ollama, every flow walked in a
+browser; fixes in design §12 "首次真实部署". Two steward keys: `GLASSDESK_STEWARD_API_KEY` (read, write) for
+everything people do, `GLASSDESK_STEWARD_REVIEW_KEY` (read, write, review) for reviewing only.
 G4 (2026-11-25): delivery — branding, demo seed, image, `deploy/` (compose, bootstrap, 部署文档).
 G0–G3 done and merged 2026-11-25. Deploy: `deploy/README.md`.
