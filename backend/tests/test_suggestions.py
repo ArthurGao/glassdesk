@@ -107,3 +107,37 @@ async def test_a_conflict_from_steward_is_409(
     [card] = (await client.get("/api/suggestions")).json()
     response = await client.post(f"/api/suggestions/{card['id']}/accept", json={"scope": "team"})
     assert (response.status_code, response.json()["detail"]) == (409, "已处理")
+
+
+async def test_the_answer_does_not_wait_for_steward_to_extract(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    """Extraction is another model call on steward's side: the answer is listed and the next
+    question is accepted while it runs; the cards follow when it is done."""
+    import asyncio
+
+    from glassdesk.steward import Candidate
+
+    class SlowExtraction(FakeSteward):
+        def __init__(self) -> None:
+            super().__init__([P1])
+            self.release = asyncio.Event()
+
+        async def report_episode(self, *a: object, **k: object) -> list[Candidate]:
+            await self.release.wait()
+            return await super().report_episode(*a, **k)  # type: ignore[arg-type]
+
+    steward = SlowExtraction()
+    client = await client_for(make_app(search_then_answer("一[1]", "二"), steward), engine, "alice")
+    conv_id, run_id = await ask(client, "记住：周五不开会")
+    for _ in range(100):  # the run itself finishes quickly
+        answers = (await client.get(f"/api/conversations/{conv_id}/answers")).json()
+        if answers:
+            break
+        await asyncio.sleep(0.02)
+    assert [a["run_id"] for a in answers] == [run_id]
+    nxt = await client.post(f"/api/conversations/{conv_id}/messages", json={"text": "下一个"})
+    assert nxt.status_code == 202  # not held up by the extraction of the previous answer
+    steward.release.set()
+    messages = parse_sse((await client.get(f"/api/conversations/{conv_id}/stream")).text)
+    assert [m[0] for m in messages][-2:] == ["suggestions", "end"]

@@ -193,14 +193,14 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
     if deps.model is None or deps.sessions is None or deps.steward is None:
         raise HTTPException(503, "模型或知识库未配置")
     try:
-        runs.claim(conv.id)
+        run_id = uuid.uuid4().hex
+        runs.claim(conv.id, run_id)
     except Busy:
         raise HTTPException(409, "上一个问题还在处理中") from None
     try:
         first = conv.agent_session_id is None
         session_id = conv.agent_session_id or uuid.uuid4().hex
         first_n = await _next_citation_number(deps.engine, conv.id)
-        run_id = uuid.uuid4().hex
         values: dict[str, object] = {"agent_session_id": session_id, "updated_at": func.now()}
         if first:
             values["title"] = body.text.strip()[:TITLE_CHARS] or NEW_TITLE
@@ -237,6 +237,7 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             first_n=first_n,
         )
         sessions, steward = deps.sessions, deps.steward
+        answered: list[str] = []  # the run's final text, for the episode
 
         async def work() -> None:
             # From whether the session exists, not from the stored id: a first run that died
@@ -253,21 +254,26 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             # failures may not have written it.
             if result.error is not None and result.error.kind != "model":
                 runs.failed[conv.id] = run_id
-                return
-            if result.text:
-                # steward decides what is worth keeping; a failure here never touches the answer
-                try:
-                    await steward.report_episode(
-                        [("user", body.text), ("assistant", result.text)],
-                        user_id=str(user.id),
-                        session_id=session_id,
-                    )
-                except Exception:
-                    log.warning("reporting the episode of run %s failed", run_id, exc_info=True)
+            elif result.text:
+                answered.append(result.text)
 
-        runs.start(conv.id, work)
+        async def report() -> None:
+            """After the claim: steward decides what is worth keeping (a model call on its side),
+            and the next question need not wait for that. A failure never touches the answer."""
+            if not answered:
+                return
+            try:
+                await steward.report_episode(
+                    [("user", body.text), ("assistant", answered[0])],
+                    user_id=str(user.id),
+                    session_id=session_id,
+                )
+            except Exception:
+                log.warning("reporting the episode of run %s failed", run_id, exc_info=True)
+
+        runs.start(conv.id, run_id, work, after=report)
     except BaseException:
-        runs.release(conv.id)
+        runs.release(conv.id, run_id)
         raise
     return RunOut(run_id=run_id)
 
@@ -293,20 +299,28 @@ async def stream(
     after: Annotated[int, Query(ge=0)] = 0,
     last_event_id: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[ServerSentEvent]:
-    """`step` events (id = a cursor to resume after) while a run goes, then the last `answer`
-    (or `failed` for a run that could not finish), then `end`: without it a browser's
-    EventSource reconnects when the stream closes."""
+    """`step` events (id = a cursor to resume after) while a run goes; a run's `answer` as soon
+    as it finished (steward may still be reading the episode); then `suggestions` (open cards),
+    `failed` for a run that could not finish, and `end`: without it a browser's EventSource
+    reconnects when the stream closes."""
     deps, runs = _deps(request), _runs(request)
     cursor = int(last_event_id) if last_event_id and last_event_id.isdigit() else after
     events: list[Event] = []
+    answered = False
     while True:
         # read before the events: a run that ends meanwhile is read once more
-        going = runs.busy(conv.id)
+        going = runs.following(conv.id)
         read_after = events[-1].seq if events else 0
         events.extend(await _events(deps, conv.agent_session_id, read_after))  # only what is new
+        start = cursor
         for at, step in changes(events, cursor):
             yield ServerSentEvent(data=step, event="step", id=str(at))
             cursor = at
+        if any(isinstance(e, RunFinished) and e.seq > start for e in events):
+            answer = await _answers(deps.engine, conv.id, events, last_only=True)
+            if answer:
+                yield ServerSentEvent(data=answer[0], event="answer")
+                answered = True
         if not going:
             break
         await asyncio.sleep(POLL_S)
@@ -316,9 +330,10 @@ async def stream(
     ):
         yield ServerSentEvent(data={"run_id": failed, "message": FAILED_MESSAGE}, event="failed")
     else:
-        answers = await _answers(deps.engine, conv.id, events, last_only=True)
-        if answers:
-            yield ServerSentEvent(data=answers[0], event="answer")
+        if not answered:  # attached to a finished conversation: its last answer
+            answers = await _answers(deps.engine, conv.id, events, last_only=True)
+            if answers:
+                yield ServerSentEvent(data=answers[0], event="answer")
         if deps.steward is not None:
             try:
                 cards = await open_cards(deps.steward, str(conv.user_id))
