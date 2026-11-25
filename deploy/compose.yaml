@@ -55,7 +55,7 @@ services:
     restart: unless-stopped
 
   steward:
-    build: https://github.com/ArthurGao/llm-steward.git#e5cb7ba8e098f8c2554d38df677419544ca71d4a:backend
+    build: https://github.com/ArthurGao/llm-steward.git#53c45e5f84e02ca68aac2d56d940d639758da709:backend
     depends_on:
       db: {condition: service_healthy}
       lite-rag: {condition: service_started}
