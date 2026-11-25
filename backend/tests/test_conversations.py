@@ -184,7 +184,7 @@ async def test_runs_that_reuse_a_call_id_keep_their_own_citations(
             AssistantTurn((Text(answer),)),
         ]
 
-    model = AsyncFakeModel(**{ROLE: [*same_id_run("一[1]"), *same_id_run("二[1]")]})
+    model = AsyncFakeModel(**{ROLE: [*same_id_run("一[1]"), *same_id_run("二[2]")]})
     steward = FakeSteward([P1])
     client = await client_for(make_app(model, steward), engine, "alice")
     conv_id, _ = await ask(client, "第一问")
@@ -204,3 +204,83 @@ async def test_runs_that_reuse_a_call_id_keep_their_own_citations(
     await client.get(f"/api/conversations/{conv_id}/stream")
     answers = (await client.get(f"/api/conversations/{conv_id}/answers")).json()
     assert [[c["item_id"] for c in a["citations"]] for a in answers] == [["e1"], ["e2"]]
+
+
+async def test_citations_number_continuously_across_searches(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    """Two searches in one run: [3] is the second search's first passage, not unmatched,
+    and [2] is the first search's second passage, never another search's."""
+    from lite_model import AssistantTurn, Text, ToolCall
+    from lite_model.testing import AsyncFakeModel
+
+    from glassdesk.agent import ROLE
+    from glassdesk.steward import Passage
+
+    p2 = Passage(
+        item_id="e2", kind="entry", title="T2", source="kb", text="t2", score=0.5, verified=False
+    )
+    model = AsyncFakeModel(
+        **{
+            ROLE: [
+                AssistantTurn((ToolCall("a", "search_knowledge", {"query": "q1"}),)),
+                AssistantTurn((ToolCall("b", "search_knowledge", {"query": "q2"}),)),
+                AssistantTurn((Text("x[2] y[3] z[9]"),)),
+            ]
+        }
+    )
+    client = await client_for(make_app(model, FakeSteward([P1, p2])), engine, "alice")
+    conv_id, _ = await ask(client)
+    messages = parse_sse((await client.get(f"/api/conversations/{conv_id}/stream")).text)
+    answer = next(m[2] for m in messages if m[0] == "answer")
+    assert [(c["n"], c["item_id"]) for c in answer["citations"]] == [(2, "e2"), (3, "e1")]
+    assert answer["unmatched"] == [9]
+
+
+async def test_a_session_that_was_never_written_is_started_on_the_next_ask(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    """The first run died before writing anything: the id is stored, the session is not."""
+    from sqlalchemy import text
+
+    client = await client_for(make_app(search_then_answer("a[1]")), engine, "alice")
+    conv = (await client.post("/api/conversations")).json()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("update conversations set agent_session_id = 'never-written' where id = :id"),
+            {"id": conv["id"]},
+        )
+    await client.post(f"/api/conversations/{conv['id']}/messages", json={"text": "q"})
+    messages = parse_sse((await client.get(f"/api/conversations/{conv['id']}/stream")).text)
+    assert [m[0] for m in messages[-2:]] == ["answer", "end"]
+
+
+class _BrokenStore:
+    """A session store whose writes fail, as when the database goes away mid-run."""
+
+    def __init__(self, inner: PgSessionStore) -> None:
+        self.inner = inner
+
+    async def append(self, *args: object, **kwargs: object) -> None:
+        from lite_agent import StoreError
+
+        raise StoreError("database went away")
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.inner, name)
+
+
+async def test_a_run_that_could_not_finish_is_reported_on_the_stream(
+    settings: Settings, engine: AsyncEngine, sessions: PgSessionStore
+) -> None:
+    deps = Deps(
+        engine=engine,
+        model=search_then_answer("a"),
+        sessions=_BrokenStore(sessions),  # type: ignore[arg-type]
+        steward=FakeSteward([P1]),
+    )
+    client = await client_for(create_app(settings, deps=deps), engine, "alice")
+    conv_id, run_id = await ask(client)
+    messages = parse_sse((await client.get(f"/api/conversations/{conv_id}/stream")).text)
+    assert [m[0] for m in messages] == ["failed", "end"]
+    assert messages[0][2] == {"run_id": run_id, "message": "这次回答没有完成，请重试。"}

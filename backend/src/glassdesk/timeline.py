@@ -22,6 +22,7 @@ from lite_agent.events import (
 )
 from pydantic import BaseModel
 
+from glassdesk.agent import PARTIAL
 from glassdesk.steward import Passage
 
 StepKind = Literal["question", "thinking", "tool", "answer", "error", "finished"]
@@ -66,6 +67,7 @@ class Answer(BaseModel):
     run_id: str
     question: str  # the run's task, in full
     text: str
+    failed: bool  # the run ended without a usable answer (model unreachable, out of budget, …)
     citations: list[Citation]
     unmatched: list[int]  # markers the model wrote that no search result backs
 
@@ -98,6 +100,8 @@ def _tool_detail(start: ToolStarted, result: ToolResultEvent | None) -> str | No
     else:
         found = len(_NUMBERED.findall(result.content))
         tail = f"{found} 条" if found else "没有找到"
+        if result.content.startswith(PARTIAL):
+            tail += "（部分结果）"
     return f"{head} → {tail}" if head else tail
 
 
@@ -202,30 +206,31 @@ def steps_after(events: Sequence[Event], after_seq: int) -> list[Step]:
 
 
 def project_answer(
-    events: Sequence[Event], passages_by_call: Mapping[str, Sequence[Passage]], run_id: str
+    events: Sequence[Event], passages_by_n: Mapping[int, Passage], run_id: str
 ) -> Answer | None:
-    """The run's final text with its `[n]` markers resolved, or None until the run finished."""
+    """The run's final text with its `[n]` markers resolved against the conversation's numbered
+    passages, or None until the run finished."""
     mine = [e for e in events if e.run_id == run_id]
-    if not any(isinstance(e, RunFinished) for e in mine):
+    finished = next((e for e in mine if isinstance(e, RunFinished)), None)
+    if finished is None:
         return None
     question = next((e.text for e in mine if isinstance(e, UserMessage) and e.origin == "task"), "")
     turns = [e for e in mine if isinstance(e, ModelTurn) and e.stop != "tool_calls"]
     text = "".join(b.text for b in turns[-1].blocks if isinstance(b, TextBlock)) if turns else ""
-    searches = [
-        passages_by_call.get(e.call_id, ())
-        for e in mine
-        if isinstance(e, ToolStarted) and e.name == "search_knowledge"
-    ]
     citations: list[Citation] = []
     unmatched: list[int] = []
     for n in dict.fromkeys(int(m) for m in _MARKER.findall(text)):
-        # the newest search that returned at least n passages
-        hit = next((s[n - 1] for s in reversed(searches) if 1 <= n <= len(s)), None)
+        hit = passages_by_n.get(n)
         if hit is None:
             unmatched.append(n)
         else:
             fields = {k: v for k, v in asdict(hit).items() if k != "score"}
             citations.append(Citation(n=n, **fields))
     return Answer(
-        run_id=run_id, question=question, text=text, citations=citations, unmatched=unmatched
+        run_id=run_id,
+        question=question,
+        text=text,
+        failed=finished.outcome == "failed",
+        citations=citations,
+        unmatched=unmatched,
     )

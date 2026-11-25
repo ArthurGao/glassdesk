@@ -80,7 +80,8 @@ export const getAnswers = <ThrowOnError extends boolean = false>(options: Option
 /**
  * Stream
  *
- * `step` events (id = a cursor to resume after) while a run goes, then the last `answer`,
- * then `end`: without it a browser's EventSource reconnects when the stream closes.
+ * `step` events (id = a cursor to resume after) while a run goes, then the last `answer`
+ * (or `failed` for a run that could not finish), then `end`: without it a browser's
+ * EventSource reconnects when the stream closes.
  */
 export const stream = <ThrowOnError extends boolean = false>(options: Options<StreamData, ThrowOnError, unknown>): Promise<ServerSentEventsResult<StreamResponses>> => (options.client ?? client).sse.get<StreamResponses, StreamErrors, ThrowOnError>({ url: '/api/conversations/{conversation_id}/stream', ...options });

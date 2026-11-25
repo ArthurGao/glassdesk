@@ -166,6 +166,8 @@ high 关键词规则，使三条写入路径在同一套配置下都能触发（
   **Ollama**（chat 模型 + embedding 模型 bge-m3）。不依赖客户的云账号，离线也能演示；代价是需要一台性能够的机器，
   部署文档要写明最低配置（内存 / GPU / 磁盘）。具体 chat 模型由实现者按选模型流程定（`llm-model-eval` skill），
   写进 lite-model 配置。换成客户的 OpenAI 兼容端点只是改 lite-model 配置，v1 不做验证。品牌配置放在一个 yaml 里（客户名、logo、主色、欢迎语、示例问题）。
+- **一个部署一个 backend 进程**：「这个会话是否有 run 在跑」记在进程内存里（`runs.py`），同一会话同时只允许一个 run；
+  多 worker 或多副本需要先把这个状态移到数据库或事件日志里（run 没有 `run_finished` 就是还在跑）。
 - 演示数据：`glassdesk seed --demo` 写入一套虚构公司的文档和条目（明确标注是演示数据），演示完可清除。
 
 ## 9. 测试
@@ -185,6 +187,7 @@ high 关键词规则，使三条写入路径在同一套配置下都能触发（
 | G2 知识进入 KB | episode 上报、确认卡片、`propose_knowledge`、知识库页面（上传、手工条目、candidate、审核） | e2e：三条写入路径各一条 |
 | G3 洞察与反馈 | 回答反馈（steward `feedback`）、KB 缺口、用量成本 | 页面数据与 steward 返回一致 |
 | G4 交付 | compose、品牌配置、演示数据、部署文档，从零部署验证 | 一台干净机器按文档部署成功 |
+| 后续 | 跨 repo 的改进（G1 审查记下）：lite-agent 导出 run 登记与事件流轮询，供 glassdesk 复用；`ToolResultEvent` 带结构化数据，引用不再单独存 `run_passages` 表、也不再从文本里数条数；lite-agent 加每个 run 的轮数上限（现在预算按整个会话累计，glassdesk 设为 200 轮） | 另行规划 |
 | 后续 | token 流式（先改 lite-model）、跨模块 tracing、SSO | 另行规划 |
 
 ## 11. 留给实现者决定的
@@ -194,3 +197,27 @@ high 关键词规则，使三条写入路径在同一套配置下都能触发（
 - 时间线步骤的分组和文案、投影的细节。
 - 假 steward 的形式（respx 还是进程内服务）。
 - 前端组件库细节、`SuggestionCard` 是复用还是参照重写（取决于 widget 能否在 steward 仓库外安装）。
+
+## 12. 阶段记录
+
+### G0 + G1（2026-11-25，分支 `feat/g0-g1`）
+
+- 完成：仓库与检查命令；本地账号登录（签名 cookie，带 `session_version`，退出后旧 cookie 失效）；`desk` agent 与
+  `search_knowledge`；事件日志投影为步骤与带引用的回答；会话、提问（同一会话同时只有一个 run，409）、SSE 步骤流
+  （游标续传，结尾 `answer` + `end`）；聊天页（会话列表、问答、引用弹窗、执行过程面板）；`glassdesk serve --fake`
+  演示模式；e2e（登录 → 提问 → 时间线 → 引用）。
+- 与计划的偏差（详见计划执行记录）：lite-model 配置放在 `GLASSDESK_LLM__*`（同 llm-steward），不是单独文件；
+  预算 200 轮（lite-agent 预算按会话累计）；e2e 由 backend 直接托管构建好的前端（8743），8742 暂未使用；
+  e2e 暂不进 CI（需要 PG）。
+- 收尾中修掉的问题：引用段落按 `call_id` 跨 run 分组，端点每轮重复用同一 call id 时会串引用（改为按 run 分组）；
+  SSE 每 250ms 读整段日志（改为只读新事件）；引用编号改为**整个会话连续编号**（原来每次搜索都从 [1] 开始，
+  搜两次时 [1] 会指错来源）；首次 run 未写入就中断的会话不再永久失效；run 无法完成时流里发 `failed`；
+  搜索结果不完整时时间线标"部分结果"；失败的回答显示提示而不是空白；流被浏览器放弃（如 401）时发送按钮恢复。
+- 延后（G2 前后再处理）：
+  - 运行中断在工具调用中间（`tool_started` 无结果）时，下一次提问会报 `UnresolvedCalls`，需要用 lite-agent 的
+    `resume` 把这些调用标为结果未知；现在这次提问会以 `failed` 显示。
+  - 发送按钮在 POST 返回前没有防重复点击，双击会看到一次误导的"上一个问题还在处理中"。
+  - 登录 cookie 的 `Secure` 取决于请求协议；放在终止 TLS 的反向代理后面时要给 uvicorn 加 `--proxy-headers`
+    （G4 部署文档写明，或做成设置）。
+  - 会话预算是整个会话 200 次模型调用（约 100 个问题），超出后回答以失败显示；需要 lite-agent 提供每个 run 的上限。
+  - `keep()` 写数据库失败时会把一次成功的搜索标成失败。

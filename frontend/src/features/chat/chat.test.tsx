@@ -19,6 +19,7 @@ const ANSWER: Answer = {
   run_id: 'r1',
   question: '报销上限是多少？',
   text: '上限 800 元[1]，需审批[3]。',
+  failed: false,
   citations: [
     { n: 1, item_id: 'e1', kind: 'entry', title: '差旅制度 v3', source: 'kb', text: '住宿上限每晚 800 元', verified: true },
   ],
@@ -138,4 +139,37 @@ test('a new question reopens the stream after the newest step already shown', as
   await ask('下一个问题')
   await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
   expect(MockEventSource.last().url).toMatch(/\/stream\?after=8$/)
+})
+
+test('a run that could not finish says so and frees Send', async () => {
+  api()
+  renderApp('/?c=c1')
+  await openIdle()
+  await ask('报销上限是多少？')
+  await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+  await userEvent.setup().type(screen.getByLabelText('问题'), '再试一次')
+  act(() => {
+    MockEventSource.last().emit('failed', { run_id: 'r2', message: '这次回答没有完成，请重试。' })
+    MockEventSource.last().emit('end', {})
+  })
+  expect(await screen.findByRole('alert')).toHaveTextContent('这次回答没有完成，请重试。')
+  expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+})
+
+test('a stream the browser gave up on frees Send and asks for a reload', async () => {
+  api()
+  renderApp('/?c=c1')
+  await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+  await userEvent.setup().type(screen.getByLabelText('问题'), '问题')
+  expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+  act(() => MockEventSource.last().fail())
+  expect(await screen.findByRole('alert')).toHaveTextContent('连接中断，请刷新页面后重试。')
+  expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+})
+
+test('a failed answer shows a retry note instead of an empty box', async () => {
+  api({ answers: [{ ...ANSWER, text: '', citations: [], unmatched: [], failed: true }] })
+  renderApp('/?c=c1')
+  await openIdle()
+  expect(await screen.findByText('这次回答没有完成，请重试。')).toBeInTheDocument()
 })

@@ -124,7 +124,7 @@ def test_unknown_cost_stays_null() -> None:
 
 def test_answer_maps_markers_and_reports_unmatched() -> None:
     events = run_events(answer="上限 800 元[1]，需审批[3]，见[1]。")
-    answer = project_answer(events, {"c1": [passage(1), passage(2)]}, "r1")
+    answer = project_answer(events, {1: passage(1), 2: passage(2)}, "r1")
     assert answer is not None
     assert answer.question == "报销上限？"
     assert answer.text == "上限 800 元[1]，需审批[3]，见[1]。"
@@ -135,12 +135,12 @@ def test_answer_maps_markers_and_reports_unmatched() -> None:
 
 
 def test_answer_without_markers_has_no_citations() -> None:
-    answer = project_answer(run_events(answer="没有找到。"), {"c1": [passage(1)]}, "r1")
+    answer = project_answer(run_events(answer="没有找到。"), {1: passage(1)}, "r1")
     assert answer is not None and answer.citations == [] and answer.unmatched == []
 
 
 def test_an_unfinished_run_has_no_answer() -> None:
-    assert project_answer(run_events()[:6], {"c1": [passage(1)]}, "r1") is None
+    assert project_answer(run_events()[:6], {1: passage(1)}, "r1") is None
 
 
 def test_steps_after_a_cut_between_tool_start_and_result_resend_the_tool_step() -> None:
@@ -157,3 +157,20 @@ def test_steps_after_a_cut_between_tool_start_and_result_resend_the_tool_step() 
 
 def test_steps_after_the_end_are_empty() -> None:
     assert steps_after(run_events(), 8) == []
+
+
+def test_a_degraded_search_is_marked_partial() -> None:
+    events = run_events()
+    result = events[5]
+    assert isinstance(result, ToolResultEvent)
+    events[5] = result.model_copy(update={"content": "（部分来源暂时不可用）\n" + result.content})
+    tool = project_steps(events)[2]
+    assert tool.detail == "“报销” → 2 条（部分结果）"
+
+
+def test_a_failed_run_has_a_failed_answer() -> None:
+    finished = RunFinished(outcome="failed", stop="error", usage=UsageData(), **env(7, ms=900))
+    events = [*run_events()[:6], finished]
+    answer = project_answer(events, {}, "r1")
+    assert answer is not None
+    assert (answer.failed, answer.text) == (True, "")

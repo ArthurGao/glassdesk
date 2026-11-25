@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from lite_agent import UnknownSession
+from lite_agent import SessionStore, UnknownSession
 from lite_agent.events import Event, RunFinished
 from pydantic import BaseModel, Field
 from sqlalchemy import Column, DateTime, Integer, Table, Text, func, insert, select, update
@@ -44,9 +44,11 @@ run_passages = Table(
     metadata,
     Column("run_id", Text, primary_key=True),
     Column("call_id", Text, primary_key=True),
-    Column("n", Integer, primary_key=True),
+    Column("n", Integer, primary_key=True),  # the citation number, unique in a conversation
     Column("passage", JSONB, nullable=False),
+    Column("conversation_id", UUID(as_uuid=True)),
 )
+FAILED_MESSAGE = "这次回答没有完成，请重试。"
 
 
 class ConversationOut(BaseModel):
@@ -107,35 +109,52 @@ async def _events(deps: Deps, session_id: str | None, after_seq: int = 0) -> Seq
         return []
 
 
-async def _passages(
-    engine: AsyncEngine, run_ids: Sequence[str]
-) -> dict[str, dict[str, list[Passage]]]:
-    """run id -> call id -> passages. Keyed by run first: call ids may repeat across runs."""
-    if not run_ids:
-        return {}
+async def _passages(engine: AsyncEngine, conversation_id: uuid.UUID) -> dict[int, Passage]:
+    """The conversation's numbered passages: what `[n]` in any of its answers refers to."""
     async with engine.connect() as conn:
         rows = (
             await conn.execute(
-                select(run_passages)
-                .where(run_passages.c.run_id.in_(run_ids))
-                .order_by(run_passages.c.call_id, run_passages.c.n)
+                select(run_passages.c.n, run_passages.c.passage).where(
+                    run_passages.c.conversation_id == conversation_id
+                )
             )
         ).all()
-    out: dict[str, dict[str, list[Passage]]] = {}
-    for r in rows:
-        out.setdefault(r.run_id, {}).setdefault(r.call_id, []).append(Passage(**r.passage))
-    return out
+    return {r.n: Passage(**r.passage) for r in rows}
+
+
+async def _next_citation_number(engine: AsyncEngine, conversation_id: uuid.UUID) -> int:
+    async with engine.connect() as conn:
+        top = await conn.scalar(
+            select(func.max(run_passages.c.n)).where(
+                run_passages.c.conversation_id == conversation_id
+            )
+        )
+    return (top or 0) + 1
 
 
 async def _answers(
-    engine: AsyncEngine, events: Sequence[Event], *, last_only: bool = False
+    engine: AsyncEngine,
+    conversation_id: uuid.UUID,
+    events: Sequence[Event],
+    *,
+    last_only: bool = False,
 ) -> list[Answer]:
     runs = [e.run_id for e in events if isinstance(e, RunFinished)]
     if last_only:
         runs = runs[-1:]
-    passages = await _passages(engine, runs)
-    answers = (project_answer(events, passages.get(r, {}), r) for r in runs)
+    if not runs:
+        return []
+    passages = await _passages(engine, conversation_id)
+    answers = (project_answer(events, passages, r) for r in runs)
     return [a for a in answers if a is not None]
+
+
+async def _session_exists(sessions: SessionStore, session_id: str) -> bool:
+    try:
+        await sessions.read(session_id, upto_seq=1)
+    except UnknownSession:
+        return False
+    return True
 
 
 @router.post("", status_code=201)
@@ -176,6 +195,7 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
     try:
         first = conv.agent_session_id is None
         session_id = conv.agent_session_id or uuid.uuid4().hex
+        first_n = await _next_citation_number(deps.engine, conv.id)
         run_id = uuid.uuid4().hex
         values: dict[str, object] = {"agent_session_id": session_id, "updated_at": func.now()}
         if first:
@@ -185,15 +205,21 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
                 update(conversations).where(conversations.c.id == conv.id).values(**values)
             )
 
-        async def keep(call_id: str, passages: Sequence[Passage]) -> None:
-            if not passages:
+        async def keep(call_id: str, numbered: Sequence[tuple[int, Passage]]) -> None:
+            if not numbered:
                 return
             async with deps.engine.begin() as conn:
                 await conn.execute(
                     insert(run_passages),
                     [
-                        {"run_id": run_id, "call_id": call_id, "n": n, "passage": asdict(p)}
-                        for n, p in enumerate(passages, start=1)
+                        {
+                            "run_id": run_id,
+                            "call_id": call_id,
+                            "n": n,
+                            "passage": asdict(p),
+                            "conversation_id": conv.id,
+                        }
+                        for n, p in numbered
                     ],
                 )
 
@@ -204,10 +230,25 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             user_id=str(user.id),
             brand_name=settings.brand_name,
             on_passages=keep,
+            first_n=first_n,
         )
+        sessions = deps.sessions
 
         async def work() -> None:
-            await agent.run(body.text, session_id=session_id, run_id=run_id, new_session=first)
+            # From whether the session exists, not from the stored id: a first run that died
+            # before writing anything leaves the id behind and no session.
+            new = not await _session_exists(sessions, session_id)
+            try:
+                result = await agent.run(
+                    body.text, session_id=session_id, run_id=run_id, new_session=new
+                )
+            except Exception:
+                runs.failed[conv.id] = run_id
+                raise
+            # A model failure ends with run_finished (a failed answer); store and harness
+            # failures may not have written it.
+            if result.error is not None and result.error.kind != "model":
+                runs.failed[conv.id] = run_id
 
         runs.start(conv.id, work)
     except BaseException:
@@ -227,7 +268,7 @@ async def get_steps(
 @router.get("/{conversation_id}/answers")
 async def get_answers(conv: Owned, request: Request) -> list[Answer]:
     deps = _deps(request)
-    return await _answers(deps.engine, await _events(deps, conv.agent_session_id))
+    return await _answers(deps.engine, conv.id, await _events(deps, conv.agent_session_id))
 
 
 @router.get("/{conversation_id}/stream", response_class=EventSourceResponse)
@@ -237,8 +278,9 @@ async def stream(
     after: Annotated[int, Query(ge=0)] = 0,
     last_event_id: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[ServerSentEvent]:
-    """`step` events (id = a cursor to resume after) while a run goes, then the last `answer`,
-    then `end`: without it a browser's EventSource reconnects when the stream closes."""
+    """`step` events (id = a cursor to resume after) while a run goes, then the last `answer`
+    (or `failed` for a run that could not finish), then `end`: without it a browser's
+    EventSource reconnects when the stream closes."""
     deps, runs = _deps(request), _runs(request)
     cursor = int(last_event_id) if last_event_id and last_event_id.isdigit() else after
     events: list[Event] = []
@@ -253,7 +295,13 @@ async def stream(
         if not going:
             break
         await asyncio.sleep(POLL_S)
-    answers = await _answers(deps.engine, events, last_only=True)
-    if answers:
-        yield ServerSentEvent(data=answers[0], event="answer")
+    failed = runs.failed.get(conv.id)
+    if failed is not None and not any(
+        isinstance(e, RunFinished) and e.run_id == failed for e in events
+    ):
+        yield ServerSentEvent(data={"run_id": failed, "message": FAILED_MESSAGE}, event="failed")
+    else:
+        answers = await _answers(deps.engine, conv.id, events, last_only=True)
+        if answers:
+            yield ServerSentEvent(data=answers[0], event="answer")
     yield ServerSentEvent(data={}, event="end")

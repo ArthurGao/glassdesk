@@ -21,6 +21,10 @@ export type Answer = {
      */
     text: string;
     /**
+     * Failed
+     */
+    failed: boolean;
+    /**
      * Citations
      */
     citations: Array<Citation>;
@@ -185,6 +189,9 @@ export type Step = {
 
 /**
  * Usage
+ *
+ * lite-agent's UsageData, copied field by field on purpose: only token counts and cost
+ * reach the page, never anything else a future UsageData might carry.
  */
 export type Usage = {
     /**

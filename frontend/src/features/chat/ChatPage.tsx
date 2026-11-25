@@ -8,6 +8,8 @@ import { chatKeys } from './keys'
 import { TimelinePanel } from './TimelinePanel'
 import { useStepStream } from './useStepStream'
 
+const FAILED = '这次回答没有完成，请重试。'
+
 export function ChatPage({ conversationId }: { conversationId?: string }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -21,7 +23,7 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
       (await getAnswers({ path: { conversation_id: conversationId! }, throwOnError: true })).data,
     enabled: !!conversationId,
   })
-  const { steps, streaming, open } = useStepStream(conversationId)
+  const { steps, streaming, problem, open } = useStepStream(conversationId)
   const [pending, setPending] = useState<string | null>(null)
   const shownPending = streaming ? pending : null
 
@@ -59,7 +61,11 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
                 <article key={a.run_id} className="space-y-2">
                   <QuestionBubble text={a.question} />
                   <div className="max-w-[80%] rounded border border-slate-200 bg-white px-3 py-2">
-                    <AnswerText answer={a} />
+                    {a.failed ? (
+                      <p className="text-slate-500">{FAILED}</p>
+                    ) : (
+                      <AnswerText answer={a} />
+                    )}
                   </div>
                 </article>
               ))}
@@ -67,6 +73,11 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
                 <QuestionBubble text={shownPending} />
               )}
             </div>
+            {problem && (
+              <p role="alert" className="mx-3 mb-1 text-sm text-red-600">
+                {problem}
+              </p>
+            )}
             <Composer
               conversationId={conversationId}
               busy={streaming}

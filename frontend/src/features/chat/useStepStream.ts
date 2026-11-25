@@ -3,7 +3,9 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Answer, Step } from '@/client/types.gen'
 import { chatKeys } from './keys'
 
-type Snapshot = { steps: Step[]; streaming: boolean }
+type Snapshot = { steps: Step[]; streaming: boolean; problem: string | null }
+
+const LOST = '连接中断，请刷新页面后重试。'
 
 /**
  * One conversation's stream, outside React: `step` events upsert by `seq` (a tool step is sent
@@ -15,7 +17,8 @@ class StepStream {
   private source: EventSource | null = null
   private steps = new Map<number, Step>()
   private cursor = 0 // the newest stream id seen: where a reopened stream picks up
-  private snapshot: Snapshot = { steps: [], streaming: false }
+  private snapshot: Snapshot = { steps: [], streaming: false, problem: null }
+  private problem: string | null = null
   private listeners = new Set<() => void>()
 
   constructor(
@@ -31,7 +34,8 @@ class StepStream {
   getSnapshot = () => this.snapshot
 
   private publish(streaming: boolean) {
-    this.snapshot = { steps: [...this.steps.values()].sort((a, b) => a.seq - b.seq), streaming }
+    const steps = [...this.steps.values()].sort((a, b) => a.seq - b.seq)
+    this.snapshot = { steps, streaming, problem: this.problem }
     for (const listener of this.listeners) listener()
   }
 
@@ -43,6 +47,7 @@ class StepStream {
       withCredentials: true,
     })
     this.source = es
+    this.problem = null
     es.addEventListener('step', (e: MessageEvent<string>) => {
       const step = JSON.parse(e.data) as Step
       this.steps.set(step.seq, step)
@@ -56,6 +61,16 @@ class StepStream {
         answer,
       ])
     })
+    es.addEventListener('failed', (e: MessageEvent<string>) => {
+      this.problem = (JSON.parse(e.data) as { message: string }).message
+    })
+    es.addEventListener('error', () => {
+      // A dropped connection is retried by the browser (CONNECTING); a refused one (401, 502)
+      // is final (CLOSED), and nothing else would free Send.
+      if (es.readyState !== EventSource.CLOSED) return
+      this.problem = LOST
+      this.close()
+    })
     es.addEventListener('end', () => {
       this.close() // the answer is already in the cache; titles and order may have changed
       void this.queryClient.invalidateQueries({ queryKey: chatKeys.conversations })
@@ -66,11 +81,11 @@ class StepStream {
   close = () => {
     this.source?.close()
     this.source = null
-    if (this.snapshot.streaming) this.publish(false)
+    if (this.snapshot.streaming || this.snapshot.problem !== this.problem) this.publish(false)
   }
 }
 
-const IDLE: Snapshot = { steps: [], streaming: false }
+const IDLE: Snapshot = { steps: [], streaming: false, problem: null }
 const NONE = { subscribe: () => () => {}, getSnapshot: () => IDLE, open: () => {}, close: () => {} }
 
 export function useStepStream(conversationId: string | undefined) {
@@ -79,10 +94,10 @@ export function useStepStream(conversationId: string | undefined) {
     () => (conversationId ? new StepStream(conversationId, queryClient) : NONE),
     [conversationId, queryClient],
   )
-  const { steps, streaming } = useSyncExternalStore(stream.subscribe, stream.getSnapshot)
+  const { steps, streaming, problem } = useSyncExternalStore(stream.subscribe, stream.getSnapshot)
   useEffect(() => {
     stream.open() // attach: replays the conversation's steps, follows a run still going
     return stream.close
   }, [stream])
-  return { steps, streaming, open: stream.open }
+  return { steps, streaming, problem, open: stream.open }
 }

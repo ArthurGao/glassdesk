@@ -29,7 +29,7 @@ DEMO_PASSAGES = (
         verified=False,
     ),
 )
-_FIRST = re.compile(r"^\[1\] (.+?) — ", re.MULTILINE)
+_FIRST = re.compile(r"^\[(\d+)\] (.+?) — ", re.MULTILINE)
 
 
 def _reply(call: FakeTurnCall) -> AssistantTurn:
@@ -39,7 +39,8 @@ def _reply(call: FakeTurnCall) -> AssistantTurn:
         found = _FIRST.search(last.results[0].content)
         if found is None:
             return AssistantTurn((Text(NOT_FOUND),))
-        return AssistantTurn((Text(f"根据《{found.group(1)}》，相关规定见引用[1]。"),))
+        n, title = found.groups()
+        return AssistantTurn((Text(f"根据《{title}》，相关规定见引用[{n}]。"),))
     question = last.content if isinstance(last, Message) else ""
     n = sum(isinstance(m, ToolResults) for m in call.messages)
     return AssistantTurn((ToolCall(f"demo-{n + 1}", "search_knowledge", {"query": question}),))

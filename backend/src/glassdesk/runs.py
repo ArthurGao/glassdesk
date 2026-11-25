@@ -15,6 +15,8 @@ class Busy(Exception):
 class Runs:
     def __init__(self) -> None:
         self._claimed: set[uuid.UUID] = set()
+        # conversation -> the run that ended without writing its end (raised, store gone)
+        self.failed: dict[uuid.UUID, str] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
     def busy(self, conversation_id: uuid.UUID) -> bool:
@@ -25,6 +27,7 @@ class Runs:
         if conversation_id in self._claimed:
             raise Busy(str(conversation_id))
         self._claimed.add(conversation_id)
+        self.failed.pop(conversation_id, None)
 
     def release(self, conversation_id: uuid.UUID) -> None:
         self._claimed.discard(conversation_id)
