@@ -90,3 +90,26 @@ async def test_repeating_the_same_rating_tells_steward_once(
     for _ in range(5):
         assert (await client.post(url, json={"helpful": False})).status_code == 200
     assert steward.feedbacks == [("fake-1", "e1", False)]
+
+
+async def test_a_run_that_raises_is_counted_as_failed(
+    make_app: Callable[..., FastAPI],
+    engine: AsyncEngine,
+    monkeypatch,  # type: ignore[no-untyped-def]
+) -> None:
+    """Insights count failures from run_usage: a run that never returned (lite-agent raises,
+    e.g. a crash mid-tool left calls unresolved) must be there too."""
+    from lite_agent import UnresolvedCalls
+
+    import glassdesk.conversations as conversations
+
+    class Raising:
+        async def run(self, *a: object, **k: object) -> None:
+            raise UnresolvedCalls("s", ("c1",))
+
+    monkeypatch.setattr(conversations, "build_agent", lambda **k: Raising())
+    client = await client_for(make_app(search_then_answer("a"), FakeSteward([P1])), engine, "alice")
+    _conv_id, run_id = await answered(client)
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text("select run_id, failed from run_usage"))).all()
+    assert [(r.run_id, r.failed) for r in rows] == [(run_id, True)]

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from lite_agent import SessionStore, UnknownSession
 from lite_agent.events import Event, RunFinished
+from lite_model import Usage
 from pydantic import BaseModel, Field
 from sqlalchemy import (
     Boolean,
@@ -299,27 +300,32 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             # From whether the session exists, not from the stored id: a first run that died
             # before writing anything leaves the id behind and no session.
             new = not await _session_exists(sessions, session_id)
+
+            async def record(usage: Usage | None, failed: bool) -> None:
+                """One row per run, a run that raised included: insights count failures here."""
+                async with deps.engine.begin() as conn:
+                    await conn.execute(
+                        insert(run_usage).values(
+                            run_id=run_id,
+                            conversation_id=conv.id,
+                            user_id=user.id,
+                            finished_at=func.now(),
+                            input_tokens=usage.input if usage else None,
+                            output_tokens=usage.output if usage else None,
+                            cost_usd=usage.cost_usd if usage else None,
+                            failed=failed,
+                        )
+                    )
+
             try:
                 result = await agent.run(
                     body.text, session_id=session_id, run_id=run_id, new_session=new
                 )
             except Exception:
                 runs.failed[conv.id] = run_id
+                await record(None, failed=True)
                 raise
-            usage = result.usage
-            async with deps.engine.begin() as conn:
-                await conn.execute(
-                    insert(run_usage).values(
-                        run_id=run_id,
-                        conversation_id=conv.id,
-                        user_id=user.id,
-                        finished_at=func.now(),
-                        input_tokens=usage.input,
-                        output_tokens=usage.output,
-                        cost_usd=usage.cost_usd,
-                        failed=result.outcome == "failed",
-                    )
-                )
+            await record(result.usage, failed=result.outcome == "failed")
             # A model failure ends with run_finished (a failed answer); store and harness
             # failures may not have written it.
             if result.error is not None and result.error.kind != "model":
