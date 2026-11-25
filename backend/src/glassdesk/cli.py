@@ -23,9 +23,16 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="a scripted model and a fixed demo knowledge base (demos without a model, e2e)",
     )
+    serve.add_argument(
+        "--proxy-headers",
+        action="store_true",
+        help="behind a TLS-terminating proxy: trust X-Forwarded-* (secure cookies, client IP)",
+    )
     sub.add_parser("openapi", help="print the OpenAPI document as JSON")
     sub.add_parser("migrate", help="create or upgrade the app's and lite-agent's tables")
     sub.add_parser("setup", help="create the deployment's steward collection if missing")
+    seed = sub.add_parser("seed", help="write demo knowledge to steward")
+    seed.add_argument("--demo", action="store_true", required=True, help="the fictional company")
     user = sub.add_parser("user", help="manage local accounts").add_subparsers(
         dest="action", required=True
     )
@@ -47,7 +54,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         settings = Settings()
         deps = _fake_deps(settings) if args.fake else None
-        uvicorn.run(create_app(settings, deps=deps), host=args.host, port=args.port)
+        uvicorn.run(
+            create_app(settings, deps=deps),
+            host=args.host,
+            port=args.port,
+            proxy_headers=args.proxy_headers,
+            forwarded_allow_ips="*" if args.proxy_headers else None,
+        )
         return 0
     if args.command == "openapi":
         print(json.dumps(_openapi(), indent=2, ensure_ascii=False))
@@ -65,6 +78,16 @@ async def run(args: argparse.Namespace | Sequence[str], *, deps: Deps | None = N
         settings = Settings()
         await run_migrations(settings.database_url, settings.db_schema, settings.agent_schema)
         print("migrated")
+        return 0
+    if args.command == "seed":
+        from glassdesk.seed import seed_demo
+        from glassdesk.steward import HttpSteward
+
+        steward = HttpSteward.from_settings(Settings())
+        try:
+            print(f"demo entries written: {await seed_demo(steward)}")
+        finally:
+            await steward.aclose()
         return 0
     if args.command == "setup":
         from glassdesk.steward import HttpSteward

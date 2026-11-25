@@ -5,12 +5,14 @@ export function Composer({
   conversationId,
   busy,
   onAsked,
+  initialText = '',
 }: {
   conversationId: string
   busy: boolean
   onAsked: (text: string) => void
+  initialText?: string
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText)
   const [error, setError] = useState<string | null>(null)
 
   async function onSubmit(event: FormEvent) {

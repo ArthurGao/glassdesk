@@ -63,6 +63,28 @@ export type BodyUploadDocument = {
 };
 
 /**
+ * Branding
+ */
+export type Branding = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Color
+     */
+    color: string;
+    /**
+     * Welcome
+     */
+    welcome: string;
+    /**
+     * Examples
+     */
+    examples: Array<string>;
+};
+
+/**
  * CandidateOut
  */
 export type CandidateOut = {
@@ -559,6 +581,22 @@ export type WrittenOut = {
     entry: EntryOut | null;
     candidate: CandidateOut | null;
 };
+
+export type BrandingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/branding';
+};
+
+export type BrandingResponses = {
+    /**
+     * Successful Response
+     */
+    200: Branding;
+};
+
+export type BrandingResponse = BrandingResponses[keyof BrandingResponses];
 
 export type HealthData = {
     body?: never;

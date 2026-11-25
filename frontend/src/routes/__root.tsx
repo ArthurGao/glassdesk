@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-router'
 import { logout } from '@/client/sdk.gen'
 import { AppShell } from '@/components/AppShell'
+import { brandingQuery } from '@/lib/branding'
 import { meQuery } from '@/lib/session'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -23,6 +24,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function Root() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const { data: user } = useQuery(meQuery)
+  const { data: brand } = useQuery(brandingQuery)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   if (pathname === '/login') return <Outlet />
@@ -34,7 +36,12 @@ function Root() {
   }
 
   return (
-    <AppShell brandName="glassdesk" username={user?.username} onLogout={onLogout}>
+    <AppShell
+      brandName={brand?.name ?? ''}
+      brandColor={brand?.color}
+      username={user?.username}
+      onLogout={onLogout}
+    >
       <Outlet />
     </AppShell>
   )

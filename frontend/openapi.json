@@ -5,6 +5,25 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/branding": {
+      "get": {
+        "summary": "Branding",
+        "description": "Public: the login page shows it too.",
+        "operationId": "branding",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branding"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "summary": "Health",
@@ -886,6 +905,37 @@
           "file"
         ],
         "title": "Body_upload_document"
+      },
+      "Branding": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "color": {
+            "type": "string",
+            "title": "Color"
+          },
+          "welcome": {
+            "type": "string",
+            "title": "Welcome"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Examples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "color",
+          "welcome",
+          "examples"
+        ],
+        "title": "Branding"
       },
       "CandidateOut": {
         "properties": {

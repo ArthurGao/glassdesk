@@ -9,18 +9,23 @@ const NAV = [
 
 export function AppShell({
   brandName,
+  brandColor,
   username,
   onLogout,
   children,
 }: {
   brandName: string
+  brandColor?: string
   username?: string
   onLogout?: () => void
   children: ReactNode
 }) {
   return (
     <div className="flex h-screen flex-col bg-slate-50 text-slate-900">
-      <header className="flex items-center gap-6 border-b border-slate-200 bg-white px-4 py-2">
+      <header
+        className="flex items-center gap-6 border-b border-t-4 border-slate-200 bg-white px-4 py-2"
+        style={brandColor ? { borderTopColor: brandColor } : undefined}
+      >
         <span className="font-semibold">{brandName}</span>
         <nav className="flex gap-4 text-sm">
           {NAV.map((item) => (

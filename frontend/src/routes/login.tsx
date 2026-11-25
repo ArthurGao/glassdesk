@@ -1,7 +1,8 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { type FormEvent, useState } from 'react'
 import { login } from '@/client/sdk.gen'
+import { brandingQuery } from '@/lib/branding'
 import { meQuery } from '@/lib/session'
 
 export const Route = createFileRoute('/login')({ component: LoginPage })
@@ -12,6 +13,7 @@ function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const queryClient = useQueryClient()
+  const { data: brand } = useQuery(brandingQuery)
   const navigate = useNavigate()
 
   async function onSubmit(event: FormEvent) {
@@ -35,7 +37,7 @@ function LoginPage() {
   return (
     <div className="flex h-screen items-center justify-center bg-slate-50">
       <form onSubmit={onSubmit} className="w-80 space-y-4 rounded-lg border border-slate-200 bg-white p-6">
-        <h1 className="text-lg font-semibold">登录</h1>
+        <h1 className="text-lg font-semibold">登录 {brand?.name}</h1>
         <label className="block text-sm">
           用户名
           <input

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Shanghai"  # the deployment's local days, for insights
     session_secret: SecretStr = Field(min_length=32)
     brand_name: str = "glassdesk"
+    brand_color: str = Field(default="#0f172a", pattern=r"^#[0-9a-fA-F]{6}$")  # only a colour
+    brand_welcome: str = ""  # shown above an empty chat
+    brand_examples: list[str] = Field(default_factory=list)  # example questions (JSON in env)
     static_dir: Path | None = None
     # lite-model's configuration (GLASSDESK_LLM__BACKEND, GLASSDESK_LLM__MODEL, GLASSDESK_LLM__ROLES
     # …). None: no model is configured, and asking a question fails at startup of the run.

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { createConversation, getAnswers, listConversations } from '@/client/sdk.gen'
+import { brandingQuery } from '@/lib/branding'
 import { AnswerFeedback } from './AnswerFeedback'
 import { AnswerText } from './CitationChip'
 import { Composer } from './Composer'
@@ -27,9 +28,12 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
   })
   const { steps, streaming, problem, open } = useStepStream(conversationId)
   const [pending, setPending] = useState<string | null>(null)
+  const [prefill, setPrefill] = useState('')
+  const { data: brand } = useQuery(brandingQuery)
   const shownPending = streaming ? pending : null
 
-  async function onNew() {
+  async function onNew(question = '') {
+    setPrefill(question)
     const { data } = await createConversation({ throwOnError: true })
     await queryClient.invalidateQueries({ queryKey: chatKeys.conversations })
     await navigate({ to: '/', search: { c: data.id } })
@@ -38,7 +42,7 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
   return (
     <div className="flex h-full">
       <nav aria-label="会话" className="w-56 border-r border-slate-200 bg-white p-2 text-sm">
-        <button type="button" onClick={onNew} className="mb-2 w-full rounded border border-slate-300 py-1">
+        <button type="button" onClick={() => onNew()} className="mb-2 w-full rounded border border-slate-300 py-1">
           + 新会话
         </button>
         <ul className="space-y-1">
@@ -85,6 +89,8 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
               </p>
             )}
             <Composer
+              key={conversationId + prefill}
+              initialText={prefill}
               conversationId={conversationId}
               busy={streaming}
               onAsked={(text) => {
@@ -94,7 +100,23 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
             />
           </>
         ) : (
-          <p className="p-6 text-slate-500">新建一个会话开始提问。</p>
+          <div className="space-y-3 p-6 text-sm">
+            <p className="text-slate-700">{brand?.welcome || '新建一个会话开始提问。'}</p>
+            {brand?.examples.length ? (
+              <div className="flex flex-wrap gap-2">
+                {brand.examples.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => onNew(q)}
+                    className="rounded border border-slate-300 bg-white px-3 py-1 hover:bg-slate-50"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         )}
       </section>
       <TimelinePanel steps={steps} />

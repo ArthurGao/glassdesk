@@ -11,6 +11,7 @@ from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from lite_agent.pg import PgSessionStore
 from lite_model import RolePolicy, RoleSpec, build_async
+from pydantic import BaseModel
 
 from glassdesk import auth, conversations, insights, kb, suggestions
 from glassdesk.agent import ROLE
@@ -19,6 +20,13 @@ from glassdesk.db import Deps, make_engine, sync_url
 from glassdesk.runs import Runs
 from glassdesk.steward import HttpSteward
 from glassdesk.web import register_steward_errors
+
+
+class Branding(BaseModel):
+    name: str
+    color: str
+    welcome: str
+    examples: list[str]
 
 
 def _operation_id(route: APIRoute) -> str:
@@ -67,6 +75,16 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
     app.state.deps = deps if deps is not None else build_deps(settings)
     app.state.runs = Runs()
     app.state.clock = lambda: datetime.now(UTC)  # tests pin it
+
+    @app.get("/api/branding")
+    async def branding() -> Branding:
+        """Public: the login page shows it too."""
+        return Branding(
+            name=settings.brand_name,
+            color=settings.brand_color,
+            welcome=settings.brand_welcome,
+            examples=settings.brand_examples,
+        )
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
