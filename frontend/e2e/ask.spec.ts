@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 test('ask a question: the timeline shows each step, the citation opens its passage', async ({ page }) => {
   await page.goto('/')
   await expect(page).toHaveURL(/\/login$/)
-  await page.getByLabel('用户名').fill('e2e')
+  await page.getByLabel('用户名').fill('e2e-admin')
   await page.getByLabel('密码').fill('e2e-password')
   await page.getByRole('button', { name: '登录' }).click()
 

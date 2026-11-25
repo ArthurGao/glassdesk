@@ -38,3 +38,24 @@ async def test_demo_model_says_not_found_when_search_is_empty() -> None:
     )
     result = await agent.run("火星签证？")
     assert result.text == "没有找到相关内容。"
+
+
+async def test_demo_model_proposes_what_it_is_told_to_remember() -> None:
+    steward = FakeSteward(DEMO_PASSAGES)
+    agent = build_agent(
+        model=demo_model(),
+        sessions=InMemorySessionStore(),
+        steward=steward,
+        user_id="u1",
+        brand_name="Acme",
+        on_passages=noop,
+    )
+    result = await agent.run("记住：周五下午不开会")
+    assert result.text == "好的，已提交，等待你确认。"
+    assert [(c.title, c.requested_for_user) for c in steward.candidates] == [
+        ("周五下午不开会", "u1")
+    ]
+    again = await steward.report_episode(
+        [("user", "记住：周五下午不开会")], user_id="u1", session_id="s"
+    )
+    assert again == []

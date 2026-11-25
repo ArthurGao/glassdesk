@@ -6,7 +6,7 @@ import re
 from lite_model import AssistantTurn, Message, Text, ToolCall, ToolResults
 from lite_model.testing import AsyncFakeModel, FakeTurnCall
 
-from glassdesk.agent import NOT_FOUND, ROLE
+from glassdesk.agent import NOT_FOUND, PROPOSED, ROLE
 from glassdesk.steward import Passage
 
 DEMO_PASSAGES = (
@@ -32,9 +32,15 @@ DEMO_PASSAGES = (
 _FIRST = re.compile(r"^\[(\d+)\] (.+?) — ", re.MULTILINE)
 
 
+REMEMBER = "记住"
+
+
 def _reply(call: FakeTurnCall) -> AssistantTurn:
-    """Search with the question; once results are back, answer citing the first one."""
+    """ "记住…" proposes the fact; any other question is searched and answered citing the first
+    passage found."""
     last = call.messages[-1]
+    if isinstance(last, ToolResults) and last.results[0].content in PROPOSED.values():
+        return AssistantTurn((Text(f"好的，{last.results[0].content}"),))
     if isinstance(last, ToolResults):
         found = _FIRST.search(last.results[0].content)
         if found is None:
@@ -43,6 +49,10 @@ def _reply(call: FakeTurnCall) -> AssistantTurn:
         return AssistantTurn((Text(f"根据《{title}》，相关规定见引用[{n}]。"),))
     question = last.content if isinstance(last, Message) else ""
     n = sum(isinstance(m, ToolResults) for m in call.messages)
+    if question.startswith(REMEMBER):
+        fact = question.removeprefix(REMEMBER).lstrip("：: ")
+        args = {"title": fact[:30], "content": fact, "reason": "用户要求记住"}
+        return AssistantTurn((ToolCall(f"demo-{n + 1}", "propose_knowledge", args),))
     return AssistantTurn((ToolCall(f"demo-{n + 1}", "search_knowledge", {"query": question}),))
 
 

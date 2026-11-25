@@ -137,6 +137,8 @@ class FakeSteward:
         if said is None:
             return []
         fact = said.split("记住", 1)[1].lstrip("：: ")
+        if any(c.content == fact and c.status == "pending" for c in self.candidates):
+            return []  # already proposed in this run: steward's extraction would dedupe it
         return [
             self._candidate(
                 fact[:30], fact, stage="awaiting_user", user=user_id, origin="extraction"

@@ -6,7 +6,7 @@ const backend = [
   'cd ../backend',
   'export GLASSDESK_DB_SCHEMA=glassdesk_e2e GLASSDESK_AGENT_SCHEMA=lite_agent_e2e GLASSDESK_STATIC_DIR=../frontend/dist',
   'uv run glassdesk migrate',
-  "(printf 'e2e-password\\n' | uv run glassdesk user create e2e --password-stdin || true)",
+  "(printf 'e2e-password\\n' | uv run glassdesk user create e2e-admin --role admin --password-stdin || true)",
   'uv run glassdesk serve --fake --port 8743',
 ].join(' && ')
 
