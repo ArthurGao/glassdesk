@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Protocol
@@ -79,6 +79,12 @@ class Written:
     candidate: Candidate | None
 
 
+@dataclass(frozen=True)
+class Decision:
+    candidate: Candidate
+    entry: Entry | None  # the entry an accepted team decision made live
+
+
 class StewardUnavailable(Exception):
     """steward could not answer. The message never carries steward's own text."""
 
@@ -100,6 +106,22 @@ class StewardPort(Protocol):
     async def upload_document(
         self, filename: str, data: bytes, mime: str, *, title: str | None
     ) -> tuple[Document, Candidate | None]: ...
+    async def report_episode(
+        self, messages: Sequence[tuple[str, str]], *, user_id: str, session_id: str
+    ) -> list[Candidate]: ...
+    async def suggest(self, text: str, *, user_id: str, session_id: str) -> Written: ...
+    async def list_candidates(
+        self, *, stage: str, user_id: str | None = None
+    ) -> list[Candidate]: ...
+    async def decide(
+        self,
+        candidate_id: str,
+        accept: bool,
+        *,
+        user_id: str | None,
+        scope: Literal["personal", "team"] | None = None,
+        note: str | None = None,
+    ) -> Decision: ...
 
 
 def _entry(e: m.EntryOut) -> Entry:
@@ -240,3 +262,59 @@ class HttpSteward:
             self._client.kb.documents.upload(col, file=(filename, data, mime), title=title),
         )
         return _document(out.document), _candidate(out.candidate) if out.candidate else None
+
+    async def report_episode(
+        self, messages: Sequence[tuple[str, str]], *, user_id: str, session_id: str
+    ) -> list[Candidate]:
+        """One question and its answer; steward extracts, scores and returns new cards."""
+        out = await _call(
+            "episode",
+            self._client.episodes.add(
+                [{"role": role, "content": text} for role, text in messages],
+                user_id=user_id,
+                session_id=session_id,
+                mode="sync",
+            ),
+        )
+        return [_candidate(c) for c in out.suggestions or []]
+
+    async def suggest(self, text: str, *, user_id: str, session_id: str) -> Written:
+        col = await self.ensure_collection()
+        out = await _call(
+            "suggest", self._client.suggest(col, text, user_id=user_id, session_id=session_id)
+        )
+        return Written(
+            entry=_entry(out.entry) if out.entry else None,
+            candidate=_candidate(out.candidate) if out.candidate else None,
+        )
+
+    async def list_candidates(self, *, stage: str, user_id: str | None = None) -> list[Candidate]:
+        """Pending candidates at `stage` (first page), the user's own when `user_id` is given."""
+        filters: dict[str, str] = {"stage": stage, "status": "pending"}
+        if user_id is not None:
+            filters["user_id"] = user_id
+        page = await _call("candidates", self._client.candidates.list(**filters))
+        return [_candidate(c) for c in page.items]
+
+    async def decide(
+        self,
+        candidate_id: str,
+        accept: bool,
+        *,
+        user_id: str | None,
+        scope: Literal["personal", "team"] | None = None,
+        note: str | None = None,
+    ) -> Decision:
+        """With `user_id`: that end user answering their card. Without: the key reviewing."""
+        fields: dict[str, Any] = {}
+        if user_id is not None:
+            fields["user_id"] = user_id
+        if scope is not None:
+            fields["scope"] = scope
+        if note is not None:
+            fields["note"] = note
+        resource = self._client.candidates
+        call = resource.accept if accept else resource.reject
+        out = await _call("decide", call(candidate_id, **fields))
+        candidate = _candidate(m.CandidateOut.model_validate(out.model_dump(exclude={"entry"})))
+        return Decision(candidate=candidate, entry=_entry(out.entry) if out.entry else None)

@@ -2,15 +2,19 @@
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Literal
 
 from glassdesk.steward import (
     HIGH_RISK_WORDS,
     Candidate,
+    Decision,
     Document,
     Entry,
     Passage,
     SearchResult,
+    StewardRejected,
     StewardUnavailable,
     Written,
 )
@@ -122,3 +126,64 @@ class FakeSteward:
         )
         self.documents.append(doc)
         return doc, None
+
+    async def report_episode(
+        self, messages: Sequence[tuple[str, str]], *, user_id: str, session_id: str
+    ) -> list[Candidate]:
+        """A card for the user when they asked to remember something (steward's extraction
+        would score it worth keeping and medium risk)."""
+        self._check()
+        said = next((text for role, text in messages if role == "user" and "记住" in text), None)
+        if said is None:
+            return []
+        fact = said.split("记住", 1)[1].lstrip("：: ")
+        return [
+            self._candidate(
+                fact[:30], fact, stage="awaiting_user", user=user_id, origin="extraction"
+            )
+        ]
+
+    async def suggest(self, text: str, *, user_id: str, session_id: str) -> Written:
+        self._check()
+        title, _, content = text.partition("\n")
+        high = _high_risk(text)
+        stage = "awaiting_review" if high else "awaiting_user"
+        cand = self._candidate(
+            title,
+            content or title,
+            stage=stage,
+            user=None if high else user_id,
+            origin="user_suggestion",
+        )
+        return Written(entry=None, candidate=cand)
+
+    async def list_candidates(self, *, stage: str, user_id: str | None = None) -> list[Candidate]:
+        self._check()
+        return [
+            c
+            for c in self.candidates
+            if c.stage == stage
+            and c.status == "pending"
+            and (user_id is None or c.requested_for_user == user_id)
+        ]
+
+    async def decide(
+        self,
+        candidate_id: str,
+        accept: bool,
+        *,
+        user_id: str | None,
+        scope: Literal["personal", "team"] | None = None,
+        note: str | None = None,
+    ) -> Decision:
+        self._check()
+        i, cand = next((i, c) for i, c in enumerate(self.candidates) if c.id == candidate_id)
+        if cand.status != "pending":
+            raise StewardRejected(409, "already decided")
+        decided = replace(cand, status="accepted" if accept else "rejected")
+        self.candidates[i] = decided
+        entry = None
+        if accept and (scope == "team" or user_id is None):
+            status = "verified" if user_id is None else "active"  # a reviewer's approval verifies
+            entry = self._entry(cand.title, cand.content, status=status, origin="user_suggestion")
+        return Decision(candidate=decided, entry=entry)
