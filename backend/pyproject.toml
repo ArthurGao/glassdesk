@@ -17,6 +17,7 @@ dependencies = [
     "lite-agent[pg]",
     # llm-steward over HTTP only (never `llm_steward` itself, workspace rule)
     "llm-steward-client",
+    "python-multipart>=0.0.34",
 ]
 
 [project.scripts]
