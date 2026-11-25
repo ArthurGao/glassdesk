@@ -4,16 +4,82 @@ export type ClientOptions = {
     baseUrl: `${string}://${string}` | (string & {});
 };
 
-export type HealthApiHealthGetData = {
+/**
+ * HTTPValidationError
+ */
+export type HttpValidationError = {
+    /**
+     * Detail
+     */
+    detail?: Array<ValidationError>;
+};
+
+/**
+ * LoginIn
+ */
+export type LoginIn = {
+    /**
+     * Username
+     */
+    username: string;
+    /**
+     * Password
+     */
+    password: string;
+};
+
+/**
+ * MeOut
+ */
+export type MeOut = {
+    /**
+     * Username
+     */
+    username: string;
+    /**
+     * Role
+     */
+    role: 'member' | 'reviewer' | 'admin';
+};
+
+/**
+ * ValidationError
+ */
+export type ValidationError = {
+    /**
+     * Location
+     */
+    loc: Array<string | number>;
+    /**
+     * Message
+     */
+    msg: string;
+    /**
+     * Error Type
+     */
+    type: string;
+    /**
+     * Input
+     */
+    input?: unknown;
+    /**
+     * Context
+     */
+    ctx?: {
+        [key: string]: unknown;
+    };
+};
+
+export type HealthData = {
     body?: never;
     path?: never;
     query?: never;
     url: '/api/health';
 };
 
-export type HealthApiHealthGetResponses = {
+export type HealthResponses = {
     /**
-     * Response Health Api Health Get
+     * Response Health
      *
      * Successful Response
      */
@@ -22,4 +88,61 @@ export type HealthApiHealthGetResponses = {
     };
 };
 
-export type HealthApiHealthGetResponse = HealthApiHealthGetResponses[keyof HealthApiHealthGetResponses];
+export type HealthResponse = HealthResponses[keyof HealthResponses];
+
+export type LoginData = {
+    body: LoginIn;
+    path?: never;
+    query?: never;
+    url: '/api/auth/login';
+};
+
+export type LoginErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type LoginError = LoginErrors[keyof LoginErrors];
+
+export type LoginResponses = {
+    /**
+     * Successful Response
+     */
+    200: MeOut;
+};
+
+export type LoginResponse = LoginResponses[keyof LoginResponses];
+
+export type LogoutData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/auth/logout';
+};
+
+export type LogoutResponses = {
+    /**
+     * Successful Response
+     */
+    204: void;
+};
+
+export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
+
+export type MeData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/me';
+};
+
+export type MeResponses = {
+    /**
+     * Successful Response
+     */
+    200: MeOut;
+};
+
+export type MeResponse = MeResponses[keyof MeResponses];
