@@ -129,7 +129,11 @@ high 关键词规则，使三条写入路径在同一套配置下都能触发（
 - **洞察数据**：steward 的 KB 缺口、命中统计、用量只在 `/admin/v1`（`/admin/v1/ns/{slug}/stats`、
   `retrieval-logs?gaps=true`）上。backend 代持 `STEWARD_ADMIN_TOKEN`（只在服务器 `.env`，从不下发到浏览器），
   用一个很薄的 HTTP 客户端读这两个接口——owner 2026-11-25 决定，不改 steward。
-- **审核身份**：backend 只代持一把 `review` 权限的 steward key，steward 的 change_log 里所有审核都记成同一个
+- **两把 steward key**（2026-11-26 首次真实部署后改）：steward 把带 `review` 权限的 key **自己写入的内容**当作已审核，
+  直接生效。所以人做的一切（手工录入、AI 提议、确认卡片、上传、打分、检索）都走 read/write 的 key
+  （`GLASSDESK_STEWARD_API_KEY`），按风险路由；只有审核队列和审核决定走带 `review` 的 key
+  （`GLASSDESK_STEWARD_REVIEW_KEY`）。原先一把 key 兼三种权限，成员录入的高风险内容会绕过审核。
+- **审核身份**：审核 key 只有一把，steward 的 change_log 里所有审核都记成同一个
   actor。glassdesk 自己记一张审计表（谁、何时、对哪个 candidate / 条目、做了什么），并把 glassdesk 用户名写进
   steward 决定的 `reason` / `note` 字段。让 steward 接收代理的 reviewer 身份是以后的跨 repo 改动，v1 不做。
 - **回答反馈**：UI 对整条回答打好评 / 差评。glassdesk 存一份回答级反馈（洞察页的好评率用它）；同时把同一个评分
@@ -259,3 +263,17 @@ high 关键词规则，使三条写入路径在同一套配置下都能触发（
   `STEWARD_KB_LLM`，否则不出确认卡片、拒绝建议（422）；演示数据没有"清除"命令（本端口没有停用条目的接口），文档写了做法。
 - 验证：glassdesk 镜像已构建并检查（迁移文件、前端静态文件在镜像里）；compose 配置能解析。**整套从零部署（bootstrap.sh）
   还没跑**：它会启动整套长期运行的服务，需要 owner 确认（见交付说明）。
+
+### 首次真实部署（2026-11-26，分支 `fix/deploy-first-run`）
+
+在本机用宿主机 Ollama（qwen3:8b、bge-m3）从零跑 `bootstrap.sh`，再用浏览器走完全部流程，发现并修好：
+- lite-rag（S15）和 lite-mem（S14）的模型配置改成 lite-model 的 backends 写法，旧变量让两者启动即退出。
+- llm-steward 镜像没装 `agent` extra，但启动时一定 import `lite_agent`：在 llm-steward 修，本仓库的 steward 固定 commit 跟进。
+- 写入条目走 60 s 的客户端（steward 先判风险、做嵌入），10 s 的客户端在模型冷启动时让演示数据写入失败；
+  原来"模型调用给更长超时"的测试什么也没验证（respx 不执行超时），改成检查请求带的超时。
+- **审核被绕过**：一把带 `review` 的 key 让成员录入的高风险条目直接"已验证"。改成两把 key（§5）。
+- steward 起草的卡片是英文：qwen3 开着思考时用英文思考，起草时丢了原文语言（9 次里 1 次保留中文）。
+  steward 的起草提示词加了"不要翻译"（9/9 保留中文），部署里 steward 和 lite-mem 关掉 qwen3 的思考。
+- 前端：引用弹窗按 Esc / 点外面关闭；保存条目时按钮显示"保存中…"并禁用（steward 判风险要几十秒，原来会重复提交）；
+  标签页标题用客户名；Enter 发送、Shift+Enter 换行（输入法确认的 Enter 不算）。
+

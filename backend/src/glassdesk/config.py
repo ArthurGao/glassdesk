@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     db_schema: str = DEFAULT_DB_SCHEMA
     agent_schema: str = DEFAULT_AGENT_SCHEMA
     steward_url: str = "http://127.0.0.1:8600"
-    steward_api_key: SecretStr  # scopes read, write and review (design §5, §7)
+    # Two keys (design §5, §7): people's writes go through the read/write key and are routed by
+    # risk; only reviewing uses the review key (read, write, review), whose own writes steward
+    # treats as reviewed.
+    steward_api_key: SecretStr
+    steward_review_key: SecretStr
     steward_collection: str = "company"
     # steward's Admin API (insights: KB gaps and counts); both unset: insights show "未配置"
     steward_admin_token: SecretStr | None = None

@@ -143,6 +143,7 @@ def _openapi() -> dict[str, object]:
     placeholder = Settings(
         database_url="postgresql+psycopg://openapi@localhost/openapi",
         steward_api_key="unused",
+        steward_review_key="unused",
         session_secret="o" * 32,
         _env_file=None,
     )

@@ -12,7 +12,7 @@ from tests.test_steward_kb import BASE, COL, candidate_json, collections, entry_
 
 @pytest.fixture
 def steward() -> HttpSteward:
-    return HttpSteward(BASE, "stw_k", collection="company", timeout_s=0.2)
+    return HttpSteward(BASE, "stw_k", "stw_r", collection="company", timeout_s=0.2)
 
 
 def _collections() -> None:
@@ -175,7 +175,7 @@ async def test_extraction_gets_more_time_than_a_search() -> None:
         )
 
     route = respx.post(f"{BASE}/v1/episodes").mock(side_effect=slow)
-    steward = HttpSteward(BASE, "stw_k", timeout_s=0.1, model_timeout_s=2.0)
+    steward = HttpSteward(BASE, "stw_k", "stw_r", timeout_s=0.1, model_timeout_s=2.0)
     assert await steward.report_episode([("user", "q")], user_id="u1", session_id="s1") == []
     # respx does not enforce timeouts: check the one the request was sent with
     assert route.calls[0].request.extensions["timeout"]["read"] == 2.0
@@ -195,8 +195,45 @@ async def test_writing_an_entry_gets_the_model_timeout() -> None:
         return_value=httpx.Response(200, json=collections("company"))
     )
     route = respx.post(f"{BASE}/v1/kb/entries").mock(side_effect=slow)
-    steward = HttpSteward(BASE, "stw_k", collection="company", timeout_s=0.1, model_timeout_s=2.0)
+    steward = HttpSteward(
+        BASE, "stw_k", "stw_r", collection="company", timeout_s=0.1, model_timeout_s=2.0
+    )
     written = await steward.create_entry("差旅制度", "800 元", author="alice")
     assert written.entry is not None and written.entry.status == "active"
     # respx does not enforce timeouts: check the one the request was sent with
     assert route.calls[0].request.extensions["timeout"]["read"] == 2.0
+
+
+def _key(route: respx.Route, call: int = 0) -> str:
+    return route.calls[call].request.headers["authorization"]
+
+
+@respx.mock
+async def test_people_write_with_the_write_key_and_only_reviews_use_the_review_key(
+    steward: HttpSteward,
+) -> None:
+    """Steward lets a review-scope key's own writes skip review: a high-risk entry a member
+    typed went live in the first real deployment. Only reviewing may use that key."""
+    _collections()
+    write = respx.post(f"{BASE}/v1/kb/entries").mock(
+        return_value=httpx.Response(201, json={"entry": entry_json(), "candidate": None})
+    )
+    await steward.create_entry("报价", "199 元", author="bob")
+    assert _key(write) == "Bearer stw_k"
+
+    queue = respx.get(f"{BASE}/v1/candidates").mock(
+        return_value=httpx.Response(200, json={"items": [], "next_cursor": None})
+    )
+    await steward.list_candidates(stage="awaiting_user", user_id="u1")
+    await steward.list_candidates(stage="awaiting_review")
+    assert (_key(queue, 0), _key(queue, 1)) == ("Bearer stw_k", "Bearer stw_r")
+
+    cid = str(uuid.uuid4())
+    accept = respx.post(f"{BASE}/v1/candidates/{cid}/accept").mock(
+        return_value=httpx.Response(
+            200, json=candidate_json(id=cid, status="accepted") | {"entry": None}
+        )
+    )
+    await steward.decide(cid, True, user_id="u1", scope="team")
+    await steward.decide(cid, True, user_id=None)
+    assert (_key(accept, 0), _key(accept, 1)) == ("Bearer stw_k", "Bearer stw_r")

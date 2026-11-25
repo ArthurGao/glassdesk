@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useState } from 'react'
 import { ask } from '@/client/sdk.gen'
 
 export function Composer({
@@ -18,7 +18,7 @@ export function Composer({
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     const question = text.trim()
-    if (!question) return
+    if (!question || busy) return
     setError(null)
     const { response } = await ask({
       path: { conversation_id: conversationId },
@@ -32,6 +32,14 @@ export function Composer({
     } else {
       setError('发送失败，请稍后再试')
     }
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sends, Shift+Enter is a new line; Enter that confirms an IME composition (pinyin) is
+    // the input method's, not a send
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
   }
 
   return (
@@ -48,7 +56,8 @@ export function Composer({
           value={text}
           maxLength={4000}
           onChange={(e) => setText(e.target.value)}
-          placeholder="输入问题…"
+          onKeyDown={onKeyDown}
+          placeholder="输入问题…（Enter 发送，Shift+Enter 换行）"
         />
         <button
           type="submit"

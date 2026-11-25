@@ -72,10 +72,12 @@ services:
       LITEMEM_EMBEDDING__BACKENDS__OLLAMA__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
       LITEMEM_LLM__BACKENDS__OPENAI__BASE_URL: ${OLLAMA_URL:-http://ollama:11434}/v1
       LITEMEM_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
+      LITEMEM_LLM__REASONING_EFFORT: none
       # the KB pipeline's model steps (risk, worthiness, drafting): without them steward makes
       # no confirmation cards and refuses suggestions (422)
       STEWARD_KB_LLM: "true"
-      STEWARD_LLM: '{"backend": "ollama", "model": "${CHAT_MODEL:-qwen3:8b}", "backends": {"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}}'
+      # thinking off: qwen3 thinks in English and then drafted Chinese knowledge in English
+      STEWARD_LLM: '{"backend": "ollama", "model": "${CHAT_MODEL:-qwen3:8b}", "reasoning_effort": "none", "backends": {"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}}'
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - steward-state:/data
@@ -90,7 +92,9 @@ services:
       GLASSDESK_DATABASE_URL: postgresql+psycopg://glassdesk:${GLASSDESK_DB_PASSWORD}@db:5432/glassdesk
       GLASSDESK_SESSION_SECRET: ${GLASSDESK_SESSION_SECRET:?run bootstrap.sh}
       GLASSDESK_STEWARD_URL: http://steward:8600
+      # read/write for everything people do; the review key for reviewing only (design §7)
       GLASSDESK_STEWARD_API_KEY: ${GLASSDESK_STEWARD_API_KEY:-unset-until-bootstrap}
+      GLASSDESK_STEWARD_REVIEW_KEY: ${GLASSDESK_STEWARD_REVIEW_KEY:-unset-until-bootstrap}
       GLASSDESK_STEWARD_NAMESPACE: glassdesk
       GLASSDESK_STEWARD_ADMIN_TOKEN: ${STEWARD_ADMIN_TOKEN}
       GLASSDESK_LLM__BACKEND: ollama

@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import type { CandidateOut, EntryOut } from '@/client/types.gen'
 import { renderApp } from '@/test/render'
 import { server } from '@/test/server'
@@ -76,4 +76,27 @@ test('a reviewer approves and the row leaves the queue', async () => {
   await user.click(within(row).getByRole('button', { name: '批准' }))
   await waitFor(() => expect(screen.queryByText('价格表')).toBeNull())
   expect(note).toEqual({ note: null })
+})
+
+test('保存 is held while steward judges the entry, so a second click writes nothing', async () => {
+  api('member')
+  let posts = 0
+  server.use(
+    http.post('*/api/kb/entries', async () => {
+      posts += 1
+      await delay(200) // steward runs a model before it answers (about 30 s on qwen3:8b)
+      return HttpResponse.json({ entry: ENTRY, candidate: null }, { status: 201 })
+    }),
+  )
+  renderApp('/knowledge')
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: '新建条目' }))
+  await user.type(screen.getByLabelText('标题'), '报销时限')
+  await user.type(screen.getByLabelText('内容'), '30 天内提交')
+  await user.click(screen.getByRole('button', { name: '保存' }))
+  const saving = screen.getByRole('button', { name: '保存中…' })
+  expect(saving).toBeDisabled()
+  await user.click(saving)
+  expect(await screen.findByRole('status')).toHaveTextContent('已存入知识库')
+  expect(posts).toBe(1)
 })

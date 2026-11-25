@@ -39,6 +39,7 @@ def settings() -> Settings:
     return Settings(
         database_url=_test_url(),
         steward_api_key="stw_test_key",  # type: ignore[arg-type]
+        steward_review_key="stw_test_review",  # type: ignore[arg-type]
         session_secret="s" * 32,  # type: ignore[arg-type]
         brand_name="Acme",
         _env_file=None,  # type: ignore[call-arg]

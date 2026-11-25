@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import {
   createRootRouteWithContext,
   Outlet,
@@ -27,6 +28,10 @@ function Root() {
   const { data: brand } = useQuery(brandingQuery)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  // the browser tab carries the customer's name too (login page included)
+  useEffect(() => {
+    if (brand) document.title = brand.name
+  }, [brand])
   if (pathname === '/login') return <Outlet />
 
   async function onLogout() {

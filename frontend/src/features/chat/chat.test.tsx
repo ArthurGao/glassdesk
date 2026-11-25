@@ -283,3 +283,38 @@ test('rating buttons are disabled while a rating is being saved', async () => {
   act(() => release())
   await waitFor(() => expect(screen.getByRole('button', { name: '没帮助' })).toBeEnabled())
 })
+
+test('the citation popover closes on Escape and on a click outside it', async () => {
+  api({ answers: [ANSWER] })
+  renderApp('/?c=c1')
+  await openIdle()
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: '[1]' }))
+  await screen.findByRole('dialog')
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await user.click(screen.getByRole('button', { name: '[1]' }))
+  await screen.findByRole('dialog')
+  await user.click(screen.getByLabelText('问题'))
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('Enter sends the question and Shift+Enter starts a new line', async () => {
+  api()
+  let asked: unknown = null
+  server.use(
+    http.post('*/api/conversations/c1/messages', async ({ request }) => {
+      asked = await request.json()
+      return HttpResponse.json({ run_id: 'r2' }, { status: 202 })
+    }),
+  )
+  renderApp('/?c=c1')
+  await openIdle()
+  const user = userEvent.setup()
+  const box = await screen.findByLabelText('问题')
+  await user.type(box, '第一行{Shift>}{Enter}{/Shift}第二行')
+  expect(box).toHaveValue('第一行\n第二行')
+  expect(asked).toBeNull()
+  await user.keyboard('{Enter}')
+  await waitFor(() => expect(asked).toEqual({ text: '第一行\n第二行' }))
+})

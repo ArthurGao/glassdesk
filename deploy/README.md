@@ -28,7 +28,8 @@ cp .env.example .env          # 改客户名称、颜色、欢迎语、示例问
 3. 启动数据库；自带 Ollama 时拉取模型。
 4. 生成 lite-rag 给 steward 用的 key。
 5. 启动 lite-rag、steward；在 steward 里建命名空间 `glassdesk`，应用 `steward-ns.yaml` 的高风险关键词规则，
-   生成 glassdesk 用的 key（read、write、review）。
+   生成 glassdesk 用的两把 key：日常读写用的（read、write），和只用于审核的（read、write、review）。
+   steward 把带审核权限的 key 自己写入的内容当作已审核，所以两把不能合成一把。
 6. 启动 glassdesk，创建管理员 `admin`，**密码只打印一次**。
 
 结束时打印访问地址，默认 http://127.0.0.1:8740 。

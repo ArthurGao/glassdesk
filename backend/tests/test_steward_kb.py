@@ -96,7 +96,7 @@ def collections(*names: str) -> dict[str, object]:
 
 @pytest.fixture
 def steward() -> HttpSteward:
-    return HttpSteward(BASE, "stw_k", collection="company", timeout_s=0.2)
+    return HttpSteward(BASE, "stw_k", "stw_r", collection="company", timeout_s=0.2)
 
 
 @respx.mock
