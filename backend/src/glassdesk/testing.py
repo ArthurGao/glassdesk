@@ -48,6 +48,7 @@ class FakeSteward:
         self.entries: list[Entry] = []
         self.documents: list[Document] = []
         self.candidates: list[Candidate] = []
+        self.feedbacks: list[tuple[str, str, bool]] = []
 
     def _check(self) -> None:
         if self.fail:
@@ -191,3 +192,7 @@ class FakeSteward:
             status = "verified" if user_id is None else "active"  # a reviewer's approval verifies
             entry = self._entry(cand.title, cand.content, status=status, origin="user_suggestion")
         return Decision(candidate=decided, entry=entry)
+
+    async def feedback(self, retrieval_id: str, item_id: str, *, helpful: bool) -> None:
+        self._check()
+        self.feedbacks.append((retrieval_id, item_id, helpful))

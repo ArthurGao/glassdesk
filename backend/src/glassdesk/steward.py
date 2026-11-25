@@ -112,6 +112,7 @@ class StewardPort(Protocol):
         self, messages: Sequence[tuple[str, str]], *, user_id: str, session_id: str
     ) -> list[Candidate]: ...
     async def suggest(self, text: str, *, user_id: str, session_id: str) -> Written: ...
+    async def feedback(self, retrieval_id: str, item_id: str, *, helpful: bool) -> None: ...
     async def list_candidates(
         self, *, stage: str, user_id: str | None = None
     ) -> list[Candidate]: ...
@@ -340,3 +341,8 @@ class HttpSteward:
         call = resource.accept if accept else resource.reject
         out = await _call("decide", call(candidate_id, user_id=user_id, scope=scope, note=note))
         return Decision(candidate=_candidate(out), entry=_entry(out.entry) if out.entry else None)
+
+    async def feedback(self, retrieval_id: str, item_id: str, *, helpful: bool) -> None:
+        """A person's verdict on one item a retrieval returned (steward flags entries for review
+        from these)."""
+        await _call("feedback", self._client.feedback(retrieval_id, item_id, helpful=helpful))

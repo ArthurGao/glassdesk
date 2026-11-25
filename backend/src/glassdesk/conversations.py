@@ -13,8 +13,21 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from lite_agent import SessionStore, UnknownSession
 from lite_agent.events import Event, RunFinished
 from pydantic import BaseModel, Field
-from sqlalchemy import Column, DateTime, Integer, Table, Text, func, insert, select, update
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    Numeric,
+    Table,
+    Text,
+    func,
+    insert,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -51,6 +64,27 @@ run_passages = Table(
     Column("n", Integer, primary_key=True),  # the citation number, unique in a conversation
     Column("passage", JSONB, nullable=False),
     Column("conversation_id", UUID(as_uuid=True)),
+    Column("retrieval_id", Text),  # steward's id for the search: feedback is reported under it
+)
+run_usage = Table(
+    "run_usage",
+    metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("conversation_id", UUID(as_uuid=True), nullable=False),
+    Column("user_id", UUID(as_uuid=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=False),
+    Column("input_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("cost_usd", Numeric(12, 6)),  # NULL: the endpoint did not say; never 0
+    Column("failed", Boolean, nullable=False),
+)
+answer_feedback = Table(
+    "answer_feedback",
+    metadata,
+    Column("run_id", Text, primary_key=True),
+    Column("user_id", UUID(as_uuid=True), primary_key=True),
+    Column("helpful", Boolean, nullable=False),
+    Column("updated_at", DateTime(timezone=True), server_default=func.now()),
 )
 FAILED_MESSAGE = "这次回答没有完成，请重试。"
 
@@ -139,24 +173,37 @@ async def _next_citation_number(engine: AsyncEngine, conversation_id: uuid.UUID)
 async def _answers(
     engine: AsyncEngine,
     conversation_id: uuid.UUID,
+    user_id: uuid.UUID,
     events: Sequence[Event],
     *,
     last_only: bool = False,
     finished_after: int | None = None,
+    run_ids: Sequence[str] | None = None,
 ) -> list[Answer]:
     """Answers of the finished runs: all, the last only, or those that finished after a seq."""
     runs = [
         e.run_id
         for e in events
-        if isinstance(e, RunFinished) and (finished_after is None or e.seq > finished_after)
+        if isinstance(e, RunFinished)
+        and (finished_after is None or e.seq > finished_after)
+        and (run_ids is None or e.run_id in run_ids)
     ]
     if last_only:
         runs = runs[-1:]
     if not runs:
         return []
     passages = await _passages(engine, conversation_id)
+    async with engine.connect() as conn:
+        rated = {
+            r.run_id: r.helpful
+            for r in await conn.execute(
+                select(answer_feedback.c.run_id, answer_feedback.c.helpful).where(
+                    answer_feedback.c.run_id.in_(runs), answer_feedback.c.user_id == user_id
+                )
+            )
+        }
     answers = (project_answer(events, passages, r) for r in runs)
-    return [a for a in answers if a is not None]
+    return [a.model_copy(update={"feedback": rated.get(a.run_id)}) for a in answers if a]
 
 
 async def _session_exists(sessions: SessionStore, session_id: str) -> bool:
@@ -215,7 +262,9 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
                 update(conversations).where(conversations.c.id == conv.id).values(**values)
             )
 
-        async def keep(call_id: str, numbered: Sequence[tuple[int, Passage]]) -> None:
+        async def keep(
+            call_id: str, retrieval_id: str, numbered: Sequence[tuple[int, Passage]]
+        ) -> None:
             if not numbered:
                 return
             async with deps.engine.begin() as conn:
@@ -228,6 +277,7 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
                             "n": n,
                             "passage": asdict(p),
                             "conversation_id": conv.id,
+                            "retrieval_id": retrieval_id,
                         }
                         for n, p in numbered
                     ],
@@ -256,6 +306,20 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             except Exception:
                 runs.failed[conv.id] = run_id
                 raise
+            usage = result.usage
+            async with deps.engine.begin() as conn:
+                await conn.execute(
+                    insert(run_usage).values(
+                        run_id=run_id,
+                        conversation_id=conv.id,
+                        user_id=user.id,
+                        finished_at=func.now(),
+                        input_tokens=usage.input,
+                        output_tokens=usage.output,
+                        cost_usd=usage.cost_usd,
+                        failed=result.outcome == "failed",
+                    )
+                )
             # A model failure ends with run_finished (a failed answer); store and harness
             # failures may not have written it.
             if result.error is not None and result.error.kind != "model":
@@ -295,7 +359,58 @@ async def get_steps(
 @router.get("/{conversation_id}/answers")
 async def get_answers(conv: Owned, request: Request) -> list[Answer]:
     deps = _deps(request)
-    return await _answers(deps.engine, conv.id, await _events(deps, conv.agent_session_id))
+    return await _answers(
+        deps.engine, conv.id, conv.user_id, await _events(deps, conv.agent_session_id)
+    )
+
+
+class FeedbackIn(BaseModel):
+    helpful: bool
+
+
+class FeedbackOut(BaseModel):
+    helpful: bool
+
+
+@router.post("/{conversation_id}/answers/{run_id}/feedback")
+async def rate_answer(
+    run_id: str, body: FeedbackIn, conv: Owned, request: Request, user: CurrentUser
+) -> FeedbackOut:
+    """The user's verdict on one answer: kept here (one per user, the latest wins) and passed to
+    steward for every item the answer cited, best effort."""
+    deps = _deps(request)
+    events = await _events(deps, conv.agent_session_id)
+    found = await _answers(deps.engine, conv.id, conv.user_id, events, run_ids=[run_id])
+    if not found:  # not a finished run of this conversation
+        raise HTTPException(404, "no such answer")
+    answer = found[0]
+    stmt = pg_insert(answer_feedback).values(run_id=run_id, user_id=user.id, helpful=body.helpful)
+    async with deps.engine.begin() as conn:
+        await conn.execute(
+            stmt.on_conflict_do_update(
+                index_elements=["run_id", "user_id"],
+                set_={"helpful": stmt.excluded.helpful, "updated_at": func.now()},
+            )
+        )
+    if deps.steward is not None and answer.citations:
+        async with deps.engine.connect() as conn:
+            retrieval_of = {
+                r.n: r.retrieval_id
+                for r in await conn.execute(
+                    select(run_passages.c.n, run_passages.c.retrieval_id).where(
+                        run_passages.c.conversation_id == conv.id,
+                        run_passages.c.n.in_([c.n for c in answer.citations]),
+                    )
+                )
+            }
+        for c in answer.citations:
+            if retrieval_of.get(c.n) is None:
+                continue
+            try:
+                await deps.steward.feedback(retrieval_of[c.n], c.item_id, helpful=body.helpful)
+            except Exception:
+                log.warning("feedback to steward for run %s failed", run_id, exc_info=True)
+    return FeedbackOut(helpful=body.helpful)
 
 
 @router.get("/{conversation_id}/stream", response_class=EventSourceResponse)
@@ -323,7 +438,9 @@ async def stream(
             yield ServerSentEvent(data=step, event="step", id=str(at))
             cursor = at
         # every run that finished since the last read, in order (several after a reconnect)
-        for answer in await _answers(deps.engine, conv.id, events, finished_after=start):
+        for answer in await _answers(
+            deps.engine, conv.id, conv.user_id, events, finished_after=start
+        ):
             yield ServerSentEvent(data=answer, event="answer")
             answered = True
         if not going:
@@ -336,7 +453,7 @@ async def stream(
         yield ServerSentEvent(data={"run_id": failed, "message": FAILED_MESSAGE}, event="failed")
     else:
         if not answered:  # attached to a finished conversation: its last answer
-            answers = await _answers(deps.engine, conv.id, events, last_only=True)
+            answers = await _answers(deps.engine, conv.id, conv.user_id, events, last_only=True)
             if answers:
                 yield ServerSentEvent(data=answers[0], event="answer")
         if deps.steward is not None:

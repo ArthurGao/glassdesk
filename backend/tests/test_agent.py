@@ -42,10 +42,12 @@ def search_then_answer(query: str, answer: str) -> AsyncFakeModel:
 
 class Recorded:
     def __init__(self) -> None:
-        self.seen: list[tuple[str, tuple[tuple[int, Passage], ...]]] = []
+        self.seen: list[tuple[str, str, tuple[tuple[int, Passage], ...]]] = []
 
-    async def __call__(self, call_id: str, numbered: Sequence[tuple[int, Passage]]) -> None:
-        self.seen.append((call_id, tuple(numbered)))
+    async def __call__(
+        self, call_id: str, retrieval_id: str, numbered: Sequence[tuple[int, Passage]]
+    ) -> None:
+        self.seen.append((call_id, retrieval_id, tuple(numbered)))
 
 
 async def tool_results(
@@ -74,7 +76,7 @@ async def test_search_tool_passes_user_and_session_and_numbers_results() -> None
         "[1] 差旅制度 v3 — 住宿上限每晚 800 元",
         "[2] 记忆 — 用户在上海办公",
     ]
-    assert recorded.seen == [("c1", ((1, P1), (2, P2)))]
+    assert recorded.seen == [("c1", "fake-1", ((1, P1), (2, P2)))]
 
 
 async def test_no_results_tool_says_not_found() -> None:

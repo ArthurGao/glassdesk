@@ -71,6 +71,7 @@ class Answer(BaseModel):
     failed: bool  # the run ended without a usable answer (model unreachable, out of budget, …)
     citations: list[Citation]
     unmatched: list[int]  # markers the model wrote that no search result backs
+    feedback: bool | None = None  # the viewer's rating: 有帮助 / 没帮助 / not rated
 
 
 @dataclass

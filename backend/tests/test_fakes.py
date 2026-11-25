@@ -5,7 +5,7 @@ from glassdesk.fakes import DEMO_PASSAGES, demo_model
 from glassdesk.testing import FakeSteward
 
 
-async def noop(call_id: str, passages: object) -> None:
+async def noop(call_id: str, retrieval_id: str, passages: object) -> None:
     return None
 
 

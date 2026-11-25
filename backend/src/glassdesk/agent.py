@@ -30,7 +30,9 @@ PROPOSED: dict[str, tuple[str, str]] = {
     "entry": ("已存入知识库。", "已存入"),
 }
 
-OnPassages = Callable[[str, Sequence[tuple[int, Passage]]], Awaitable[None]]
+# (call id, steward's retrieval id, [(citation number, passage), …]): what the page resolves
+# `[n]` against, and what feedback on an answer is reported under
+OnPassages = Callable[[str, str, Sequence[tuple[int, Passage]]], Awaitable[None]]
 
 
 class SearchArgs(BaseModel):
@@ -72,7 +74,8 @@ def build_agent(
         nonlocal next_n
         result = await steward.search(args.query, user_id=user_id, session_id=ctx.session_id)
         start, next_n = next_n, next_n + len(result.passages)
-        await on_passages(ctx.call_id, list(enumerate(result.passages, start=start)))
+        numbered = list(enumerate(result.passages, start=start))
+        await on_passages(ctx.call_id, result.retrieval_id, numbered)
         return format_passages(result.passages, result.degraded, start=start)
 
     @tool(description="提议把一条知识存入公司知识库。是否生效由知识库的审核规则决定。")
