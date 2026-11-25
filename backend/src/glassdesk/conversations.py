@@ -98,16 +98,19 @@ async def _owned(
 Owned = Annotated["Row[tuple[object, ...]]", Depends(_owned)]
 
 
-async def _events(deps: Deps, session_id: str | None) -> Sequence[Event]:
+async def _events(deps: Deps, session_id: str | None, after_seq: int = 0) -> Sequence[Event]:
     if session_id is None or deps.sessions is None:
         return []
     try:
-        return await deps.sessions.read(session_id)
+        return await deps.sessions.read(session_id, after_seq=after_seq)
     except UnknownSession:  # asked, but the run has not written its first event yet
         return []
 
 
-async def _passages(engine: AsyncEngine, run_ids: Sequence[str]) -> dict[str, list[Passage]]:
+async def _passages(
+    engine: AsyncEngine, run_ids: Sequence[str]
+) -> dict[str, dict[str, list[Passage]]]:
+    """run id -> call id -> passages. Keyed by run first: call ids may repeat across runs."""
     if not run_ids:
         return {}
     async with engine.connect() as conn:
@@ -118,20 +121,20 @@ async def _passages(engine: AsyncEngine, run_ids: Sequence[str]) -> dict[str, li
                 .order_by(run_passages.c.call_id, run_passages.c.n)
             )
         ).all()
-    out: dict[str, list[Passage]] = {}
+    out: dict[str, dict[str, list[Passage]]] = {}
     for r in rows:
-        out.setdefault(r.call_id, []).append(Passage(**r.passage))
+        out.setdefault(r.run_id, {}).setdefault(r.call_id, []).append(Passage(**r.passage))
     return out
 
 
-def _finished_runs(events: Sequence[Event]) -> list[str]:
-    return [e.run_id for e in events if isinstance(e, RunFinished)]
-
-
-async def _answers(engine: AsyncEngine, events: Sequence[Event]) -> list[Answer]:
-    runs = _finished_runs(events)
+async def _answers(
+    engine: AsyncEngine, events: Sequence[Event], *, last_only: bool = False
+) -> list[Answer]:
+    runs = [e.run_id for e in events if isinstance(e, RunFinished)]
+    if last_only:
+        runs = runs[-1:]
     passages = await _passages(engine, runs)
-    answers = (project_answer(events, passages, r) for r in runs)
+    answers = (project_answer(events, passages.get(r, {}), r) for r in runs)
     return [a for a in answers if a is not None]
 
 
@@ -238,18 +241,19 @@ async def stream(
     then `end`: without it a browser's EventSource reconnects when the stream closes."""
     deps, runs = _deps(request), _runs(request)
     cursor = int(last_event_id) if last_event_id and last_event_id.isdigit() else after
+    events: list[Event] = []
     while True:
-        going = runs.busy(
-            conv.id
-        )  # read before the events: a run that ends meanwhile is read once more
-        events = await _events(deps, conv.agent_session_id)
+        # read before the events: a run that ends meanwhile is read once more
+        going = runs.busy(conv.id)
+        read_after = events[-1].seq if events else 0
+        events.extend(await _events(deps, conv.agent_session_id, read_after))  # only what is new
         for at, step in changes(events, cursor):
             yield ServerSentEvent(data=step, event="step", id=str(at))
             cursor = at
         if not going:
             break
         await asyncio.sleep(POLL_S)
-    answers = await _answers(deps.engine, events)
+    answers = await _answers(deps.engine, events, last_only=True)
     if answers:
-        yield ServerSentEvent(data=answers[-1], event="answer")
+        yield ServerSentEvent(data=answers[0], event="answer")
     yield ServerSentEvent(data={}, event="end")

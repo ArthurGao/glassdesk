@@ -166,3 +166,41 @@ async def test_a_stream_with_nothing_running_ends_at_once(
     conv = (await client.post("/api/conversations")).json()
     messages = parse_sse((await client.get(f"/api/conversations/{conv['id']}/stream")).text)
     assert [m[0] for m in messages] == ["end"]
+
+
+async def test_runs_that_reuse_a_call_id_keep_their_own_citations(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    """Some endpoints number tool calls per turn (call_0, …): ids repeat across runs."""
+    from lite_model import AssistantTurn, Text, ToolCall
+    from lite_model.testing import AsyncFakeModel
+
+    from glassdesk.agent import ROLE
+    from glassdesk.steward import Passage
+
+    def same_id_run(answer: str) -> list[AssistantTurn]:
+        return [
+            AssistantTurn((ToolCall("call_0", "search_knowledge", {"query": "q"}),)),
+            AssistantTurn((Text(answer),)),
+        ]
+
+    model = AsyncFakeModel(**{ROLE: [*same_id_run("一[1]"), *same_id_run("二[1]")]})
+    steward = FakeSteward([P1])
+    client = await client_for(make_app(model, steward), engine, "alice")
+    conv_id, _ = await ask(client, "第一问")
+    await client.get(f"/api/conversations/{conv_id}/stream")
+    steward.passages = (
+        Passage(
+            item_id="e2",
+            kind="entry",
+            title="第二份",
+            source="kb",
+            text="t2",
+            score=0.7,
+            verified=False,
+        ),
+    )
+    await client.post(f"/api/conversations/{conv_id}/messages", json={"text": "第二问"})
+    await client.get(f"/api/conversations/{conv_id}/stream")
+    answers = (await client.get(f"/api/conversations/{conv_id}/answers")).json()
+    assert [[c["item_id"] for c in a["citations"]] for a in answers] == [["e1"], ["e2"]]
