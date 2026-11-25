@@ -250,8 +250,8 @@ class HttpSteward:
 
     def _candidates_for(self, user_id: str | None) -> AsyncCandidates:
         """Candidates as `user_id` (an end user: the write key) or, without one, as a reviewer (the
-        review key). The only place a review-key call is chosen: steward treats that key's own
-        writes as reviewed, so nothing a person writes may come through it."""
+        review key). Steward treats the review key's own writes as reviewed, so nothing a person
+        writes may come through it; besides reviewing, it only creates the collection."""
         return (self._client if user_id is not None else self._review_client).candidates
 
     async def aclose(self) -> None:
@@ -290,9 +290,10 @@ class HttpSteward:
                 page = await _call("collections", self._client.kb.collections.list())
                 found = next((c for c in page.items if c.name == self._collection_name), None)
                 if found is None:
+                    # a collection's review policy is a reviewer's decision (steward)
                     found = await _call(
                         "create collection",
-                        self._client.kb.collections.create(self._collection_name),
+                        self._review_client.kb.collections.create(self._collection_name),
                     )
                 self._collection_id = str(found.id)
             return self._collection_id

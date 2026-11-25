@@ -111,6 +111,9 @@ async def test_ensure_collection_creates_it_once_and_caches(steward: HttpSteward
     assert await steward.ensure_collection() == COL
     assert (listed.call_count, created.call_count) == (1, 1)
     assert json.loads(created.calls[0].request.content)["name"] == "company"
+    # creating a collection sets its review policy: steward allows it to a reviewer only
+    assert listed.calls[0].request.headers["authorization"] == "Bearer stw_k"
+    assert created.calls[0].request.headers["authorization"] == "Bearer stw_r"
 
 
 @respx.mock
