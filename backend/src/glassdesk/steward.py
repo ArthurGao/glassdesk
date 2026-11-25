@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 import httpx
 from llm_steward_client import AsyncSteward, StewardError
 from llm_steward_client import _models as m
+from llm_steward_client._client import AsyncCandidates
 
 if TYPE_CHECKING:
     from glassdesk.config import Settings
@@ -247,6 +248,12 @@ class HttpSteward:
         self._collection_id: str | None = None
         self._resolving = asyncio.Lock()
 
+    def _candidates_for(self, user_id: str | None) -> AsyncCandidates:
+        """Candidates as `user_id` (an end user: the write key) or, without one, as a reviewer (the
+        review key). The only place a review-key call is chosen: steward treats that key's own
+        writes as reviewed, so nothing a person writes may come through it."""
+        return (self._client if user_id is not None else self._review_client).candidates
+
     async def aclose(self) -> None:
         await self._client.aclose()
         await self._model_client.aclose()
@@ -348,15 +355,13 @@ class HttpSteward:
         """Every pending candidate at `stage`, the user's own when `user_id` is given (without
         one: the review queue, read with the review key): the ownership and queue checks rely on
         the list being whole, so all pages are read."""
-        client = self._client if user_id is not None else self._review_client
+        candidates = self._candidates_for(user_id)
         found: list[Candidate] = []
         cursor: str | None = None
         while True:
             page = await _call(
                 "candidates",
-                client.candidates.list(
-                    stage=stage, status="pending", user_id=user_id, cursor=cursor
-                ),
+                candidates.list(stage=stage, status="pending", user_id=user_id, cursor=cursor),
             )
             found.extend(_candidate(c) for c in page.items)
             if page.next_cursor is None:
@@ -374,7 +379,7 @@ class HttpSteward:
     ) -> Decision:
         """With `user_id`: that end user answering their card. Without: a reviewer deciding, with
         the review key."""
-        resource = (self._client if user_id is not None else self._review_client).candidates
+        resource = self._candidates_for(user_id)
         call = resource.accept if accept else resource.reject
         out = await _call("decide", call(candidate_id, user_id=user_id, scope=scope, note=note))
         return Decision(candidate=_candidate(out), entry=_entry(out.entry) if out.entry else None)

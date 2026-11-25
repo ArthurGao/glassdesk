@@ -1,4 +1,4 @@
-import { type FormEvent, type KeyboardEvent, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useRef, useState } from 'react'
 import { ask } from '@/client/sdk.gen'
 
 export function Composer({
@@ -14,15 +14,24 @@ export function Composer({
 }) {
   const [text, setText] = useState(initialText)
   const [error, setError] = useState<string | null>(null)
+  // the POST itself, before the stream (`busy`) starts: a ref, so a second Enter in the same
+  // render cannot slip through
+  const sending = useRef(false)
+  const [sendingNow, setSendingNow] = useState(false)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     const question = text.trim()
-    if (!question || busy) return
+    if (!question || busy || sending.current) return
+    sending.current = true
+    setSendingNow(true)
     setError(null)
     const { response } = await ask({
       path: { conversation_id: conversationId },
       body: { text: question },
+    }).finally(() => {
+      sending.current = false
+      setSendingNow(false)
     })
     if (response?.status === 202) {
       setText('')
@@ -61,7 +70,7 @@ export function Composer({
         />
         <button
           type="submit"
-          disabled={busy || !text.trim()}
+          disabled={busy || sendingNow || !text.trim()}
           className="rounded bg-slate-900 px-4 text-sm text-white disabled:opacity-50"
         >
           发送

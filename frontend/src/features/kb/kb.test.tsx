@@ -100,3 +100,25 @@ test('保存 is held while steward judges the entry, so a second click writes no
   expect(await screen.findByRole('status')).toHaveTextContent('已存入知识库')
   expect(posts).toBe(1)
 })
+
+test('上传 is held while the document is being sent', async () => {
+  api('member')
+  let posts = 0
+  server.use(
+    http.post('*/api/kb/documents', async () => {
+      posts += 1
+      await delay(200)
+      return HttpResponse.json({ document: null, candidate: null }, { status: 201 })
+    }),
+  )
+  renderApp('/knowledge')
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('tab', { name: '文档' }))
+  await user.upload(await screen.findByLabelText('文件'), new File(['30 天'], 'a.md', { type: 'text/markdown' }))
+  await user.click(screen.getByRole('button', { name: '上传' }))
+  const sending = screen.getByRole('button', { name: '上传中…' })
+  expect(sending).toBeDisabled()
+  await user.click(sending)
+  expect(await screen.findByRole('status')).toHaveTextContent('已上传')
+  expect(posts).toBe(1)
+})

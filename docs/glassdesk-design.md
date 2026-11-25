@@ -275,5 +275,8 @@ high 关键词规则，使三条写入路径在同一套配置下都能触发（
 - steward 起草的卡片是英文：qwen3 开着思考时用英文思考，起草时丢了原文语言（9 次里 1 次保留中文）。
   steward 的起草提示词加了"不要翻译"（9/9 保留中文），部署里 steward 和 lite-mem 关掉 qwen3 的思考。
 - 前端：引用弹窗按 Esc / 点外面关闭；保存条目时按钮显示"保存中…"并禁用（steward 判风险要几十秒，原来会重复提交）；
-  标签页标题用客户名；Enter 发送、Shift+Enter 换行（输入法确认的 Enter 不算）。
+  标签页标题用客户名；Enter 发送、Shift+Enter 换行（输入法确认的 Enter 不算）；发送问题、上传文档在请求中也禁用按钮。
+- 收尾：simplify（选哪把 key 只在 `HttpSteward._candidates_for` 一处）；Codex 无发现。没做的：共享连接池（审核少，
+  省得不多）、全站改用 `useMutation`（超出本次范围）。根因在 steward（"带 review 的 key 自己写入即视为已审核"）：
+  以后可以在 steward 加显式的"跳过审核"开关，到时 glassdesk 可以回到一把 key。
 

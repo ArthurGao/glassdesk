@@ -318,3 +318,22 @@ test('Enter sends the question and Shift+Enter starts a new line', async () => {
   await user.keyboard('{Enter}')
   await waitFor(() => expect(asked).toEqual({ text: '第一行\n第二行' }))
 })
+
+test('a second Enter while the question is being sent sends nothing', async () => {
+  api()
+  let posts = 0
+  server.use(
+    http.post('*/api/conversations/c1/messages', async () => {
+      posts += 1
+      await delay(100)
+      return HttpResponse.json({ run_id: 'r2' }, { status: 202 })
+    }),
+  )
+  renderApp('/?c=c1')
+  await openIdle()
+  const user = userEvent.setup()
+  await user.type(await screen.findByLabelText('问题'), '报销上限是多少？')
+  await user.keyboard('{Enter}{Enter}')
+  await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
+  expect(posts).toBe(1)
+})

@@ -134,11 +134,15 @@ function Documents() {
   const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
-    if (!file) return
-    const { data, error } = await uploadDocument({ body: { file, title: title || null } })
+    if (!file || uploading) return
+    setUploading(true)
+    const { data, error } = await uploadDocument({ body: { file, title: title || null } }).finally(
+      () => setUploading(false),
+    )
     if (!data) {
       const detail = (error as { detail?: unknown } | undefined)?.detail
       setNotice(typeof detail === 'string' ? detail : '上传失败，请稍后再试')
@@ -161,7 +165,9 @@ function Documents() {
           标题（可选）
           <input className="mt-1 block rounded border border-slate-300 px-2 py-1" value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
-        <button type="submit" disabled={!file} className="rounded bg-slate-900 px-3 py-1 text-white disabled:opacity-50">上传</button>
+        <button type="submit" disabled={!file || uploading} className="rounded bg-slate-900 px-3 py-1 text-white disabled:opacity-50">
+          {uploading ? '上传中…' : '上传'}
+        </button>
         {notice && <p role="status" className="text-slate-600">{notice}</p>}
       </form>
       <table className="w-full bg-white">
