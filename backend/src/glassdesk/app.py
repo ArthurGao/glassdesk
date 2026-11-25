@@ -29,7 +29,11 @@ def build_deps(settings: Settings) -> Deps:
         engine=make_engine(settings.database_url, settings.db_schema),
         model=model,
         sessions=PgSessionStore(sync_url(settings.database_url), schema=settings.agent_schema),
-        steward=HttpSteward(settings.steward_url, settings.steward_api_key.get_secret_value()),
+        steward=HttpSteward(
+            settings.steward_url,
+            settings.steward_api_key.get_secret_value(),
+            collection=settings.steward_collection,
+        ),
     )
 
 

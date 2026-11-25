@@ -25,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("openapi", help="print the OpenAPI document as JSON")
     sub.add_parser("migrate", help="create or upgrade the app's and lite-agent's tables")
+    sub.add_parser("setup", help="create the deployment's steward collection if missing")
     user = sub.add_parser("user", help="manage local accounts").add_subparsers(
         dest="action", required=True
     )
@@ -64,6 +65,20 @@ async def run(args: argparse.Namespace | Sequence[str], *, deps: Deps | None = N
         settings = Settings()
         await run_migrations(settings.database_url, settings.db_schema, settings.agent_schema)
         print("migrated")
+        return 0
+    if args.command == "setup":
+        from glassdesk.steward import HttpSteward
+
+        settings = Settings()
+        steward = HttpSteward(
+            settings.steward_url,
+            settings.steward_api_key.get_secret_value(),
+            collection=settings.steward_collection,
+        )
+        try:
+            print(f"collection {settings.steward_collection}: {await steward.ensure_collection()}")
+        finally:
+            await steward.aclose()
         return 0
     owned = deps is None
     if deps is None:

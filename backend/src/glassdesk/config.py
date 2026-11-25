@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     db_schema: str = DEFAULT_DB_SCHEMA
     agent_schema: str = DEFAULT_AGENT_SCHEMA
     steward_url: str = "http://127.0.0.1:8600"
-    steward_api_key: SecretStr
+    steward_api_key: SecretStr  # scopes read, write and review (design §5, §7)
+    steward_collection: str = "company"
     session_secret: SecretStr = Field(min_length=32)
     brand_name: str = "glassdesk"
     static_dir: Path | None = None
