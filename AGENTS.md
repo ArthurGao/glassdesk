@@ -26,7 +26,8 @@ docs/      design and plans
 4. The timeline never exposes the system prompt, provenance URLs, keys or upstream error text.
 5. Tests never call a real LLM, a real steward, Ollama or llm-gateway (`AsyncFakeModel`, `FakeSteward`).
 6. Unknown cost is `null` in the API and "未知" in the UI, never 0.
-7. Code-facing text English; UI copy Chinese; Conventional Commits.
+7. Code-facing text and docs (design doc, READMEs, plans, comments) English; UI copy Chinese (quoted as-is
+   in the docs); Conventional Commits.
 
 ## Commands
 
@@ -41,7 +42,7 @@ backend `127.0.0.1:8740`, frontend dev `8741`, e2e preview `8742`, e2e backend (
 ## Current stage
 
 First real deployment (2026-11-26): `bootstrap.sh` verified from zero on the host's Ollama, every flow walked in a
-browser; fixes in design §12 "首次真实部署". Two steward keys: `GLASSDESK_STEWARD_API_KEY` (read, write) for
+browser; fixes in design §12 "First real deployment". Two steward keys: `GLASSDESK_STEWARD_API_KEY` (read, write) for
 everything people do, `GLASSDESK_STEWARD_REVIEW_KEY` (read, write, review) for reviewing only.
-G4 (2026-11-25): delivery — branding, demo seed, image, `deploy/` (compose, bootstrap, 部署文档).
+G4 (2026-11-25): delivery — branding, demo seed, image, `deploy/` (compose, bootstrap, deployment guide).
 G0–G3 done and merged 2026-11-25. Deploy: `deploy/README.md`.

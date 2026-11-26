@@ -4,7 +4,7 @@
 
 **Goal:** Users rate each answer (有帮助 / 没帮助); the rating is kept per answer in glassdesk and passed to steward for every item the answer cited, so steward's review flags work. Reviewers and admins get an insights page: answers per day, failures, tokens and cost (unknown cost never shown as 0), helpful rate, the KB's gaps and counts from steward.
 
-**Spec:** `docs/glassdesk-design.md` §4 (洞察), §5 "后台数据与审计" (insights via the admin token; answer feedback), §10 G3. KB `global/engineering/dates-time-and-metrics.md` §4, §6.
+**Spec:** `docs/glassdesk-design.md` §4 (洞察), §5 "Admin data and audit" (insights via the admin token; answer feedback), §10 G3. KB `global/engineering/dates-time-and-metrics.md` §4, §6.
 
 ## Global Constraints
 
