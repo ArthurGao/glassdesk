@@ -237,7 +237,7 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "itsdangerous", specifier = ">=2.2" },
-    { name = "lite-agent", extras = ["pg"], url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.2.5/lite_agent-0.2.5-py3-none-any.whl" },
+    { name = "lite-agent", extras = ["pg"], url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.3.0/lite_agent-0.3.0-py3-none-any.whl" },
     { name = "llm-steward-client", git = "https://github.com/ArthurGao/llm-steward?subdirectory=sdk%2Fpython&rev=53c45e5f84e02ca68aac2d56d940d639758da709" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -453,8 +453,8 @@ wheels = [
 
 [[package]]
 name = "lite-agent"
-version = "0.2.5"
-source = { url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.2.5/lite_agent-0.2.5-py3-none-any.whl" }
+version = "0.3.0"
+source = { url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.3.0/lite_agent-0.3.0-py3-none-any.whl" }
 dependencies = [
     { name = "lite-context" },
     { name = "lite-model" },
@@ -463,7 +463,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.2.5/lite_agent-0.2.5-py3-none-any.whl", hash = "sha256:3fb78f5b08c72c0f4735f5f672517094ca35d09adabfc9c304539af6593337ca" },
+    { url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.3.0/lite_agent-0.3.0-py3-none-any.whl", hash = "sha256:141307983b695fe3f8506857deb07e943c54b338b2d49b72ffcba03e33194f0a" },
 ]
 
 [package.optional-dependencies]
