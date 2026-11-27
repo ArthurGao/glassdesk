@@ -1,11 +1,10 @@
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Answer, CardOut, Step } from '@/client/types.gen'
+import { useT } from '@/lib/i18n'
 import { chatKeys } from './keys'
 
 type Snapshot = { steps: Step[]; streaming: boolean; problem: string | null }
-
-const LOST = '连接中断，请刷新页面后重试。'
 
 /**
  * One conversation's stream, outside React: `step` events upsert by `seq` (a tool step is sent
@@ -24,6 +23,7 @@ class StepStream {
   constructor(
     private readonly conversationId: string,
     private readonly queryClient: QueryClient,
+    private readonly lostMessage: string,
   ) {}
 
   subscribe = (listener: () => void) => {
@@ -78,7 +78,7 @@ class StepStream {
       // A dropped connection is retried by the browser (CONNECTING); a refused one (401, 502)
       // is final (CLOSED), and nothing else would free Send.
       if (es.readyState !== EventSource.CLOSED) return
-      this.problem = LOST
+      this.problem = this.lostMessage
       this.close()
     })
     es.addEventListener('end', () => {
@@ -100,9 +100,10 @@ const NONE = { subscribe: () => () => {}, getSnapshot: () => IDLE, open: () => {
 
 export function useStepStream(conversationId: string | undefined) {
   const queryClient = useQueryClient()
+  const lostMessage = useT().chat.lost
   const stream = useMemo(
-    () => (conversationId ? new StepStream(conversationId, queryClient) : NONE),
-    [conversationId, queryClient],
+    () => (conversationId ? new StepStream(conversationId, queryClient, lostMessage) : NONE),
+    [conversationId, queryClient, lostMessage],
   )
   const { steps, streaming, problem } = useSyncExternalStore(stream.subscribe, stream.getSnapshot)
   useEffect(() => {

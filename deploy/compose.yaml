@@ -101,6 +101,7 @@ services:
       GLASSDESK_LLM__MODEL: ${CHAT_MODEL:-qwen3:8b}
       GLASSDESK_LLM__BACKENDS: '{"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}'
       GLASSDESK_TIMEZONE: ${TIMEZONE:-Asia/Shanghai}
+      GLASSDESK_LOCALE: ${LOCALE:-zh}
       GLASSDESK_BRAND_NAME: ${BRAND_NAME:-glassdesk}
       GLASSDESK_BRAND_COLOR: ${BRAND_COLOR:-#0f172a}
       GLASSDESK_BRAND_WELCOME: ${BRAND_WELCOME:-}

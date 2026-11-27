@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Answer, Citation } from '@/client/types.gen'
+import { useT } from '@/lib/i18n'
 
 function CitationChip({ citation }: { citation: Citation }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLSpanElement>(null)
   useEffect(() => {
@@ -29,13 +31,13 @@ function CitationChip({ citation }: { citation: Citation }) {
       {open && (
         <span
           role="dialog"
-          aria-label={`引用 ${citation.n}`}
+          aria-label={t.chat.citation(citation.n)}
           className="absolute left-0 top-6 z-10 block w-72 rounded border border-slate-200 bg-white p-3 text-sm shadow-lg"
         >
           <span className="flex items-center gap-2 font-medium">
-            {citation.title ?? (citation.kind === 'memory' ? '记忆' : '知识')}
+            {citation.title ?? (citation.kind === 'memory' ? t.chat.memory : t.chat.knowledge)}
             {citation.verified && (
-              <span className="rounded bg-emerald-100 px-1 text-xs text-emerald-800">已验证</span>
+              <span className="rounded bg-emerald-100 px-1 text-xs text-emerald-800">{t.chat.verified}</span>
             )}
           </span>
           <span className="mt-1 block text-slate-700">{citation.text}</span>

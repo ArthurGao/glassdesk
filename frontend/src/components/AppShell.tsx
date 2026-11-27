@@ -1,10 +1,11 @@
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { useT } from '@/lib/i18n'
 
 const NAV = [
-  { to: '/', label: '聊天' },
-  { to: '/knowledge', label: '知识库' },
-  { to: '/insights', label: '洞察' },
+  { to: '/', label: 'chat' },
+  { to: '/knowledge', label: 'knowledge' },
+  { to: '/insights', label: 'insights' },
 ] as const
 
 export function AppShell({
@@ -20,6 +21,7 @@ export function AppShell({
   onLogout?: () => void
   children: ReactNode
 }) {
+  const t = useT()
   return (
     <div className="flex h-screen flex-col bg-slate-50 text-slate-900">
       <header
@@ -36,7 +38,7 @@ export function AppShell({
               activeProps={{ className: 'font-medium text-slate-900' }}
               activeOptions={{ exact: true }}
             >
-              {item.label}
+              {t.nav[item.label]}
             </Link>
           ))}
         </nav>
@@ -44,7 +46,7 @@ export function AppShell({
           <div className="ml-auto flex items-center gap-3 text-sm">
             <span>{username}</span>
             <button type="button" onClick={onLogout} className="text-slate-500 hover:text-slate-900">
-              退出
+              {t.nav.logout}
             </button>
           </div>
         )}

@@ -22,13 +22,11 @@ from lite_agent.events import (
 )
 from pydantic import BaseModel
 
-from glassdesk.agent import PARTIAL, PROPOSED
+from glassdesk.i18n import ANY_PARTIAL, ANY_PROPOSED, ZH, Texts
 from glassdesk.steward import Passage
 
 StepKind = Literal["question", "thinking", "tool", "answer", "error", "finished"]
 StepStatus = Literal["running", "ok", "error"]
-TOOL_TITLES = {"search_knowledge": "搜索知识库", "propose_knowledge": "提议存入知识库"}
-_PROPOSAL_OUTCOME = dict(PROPOSED.values())  # model text -> timeline label
 _NUMBERED = re.compile(r"^\[\d+\] ", re.MULTILINE)
 _MARKER = re.compile(r"\[(\d+)\]")
 
@@ -71,7 +69,7 @@ class Answer(BaseModel):
     failed: bool  # the run ended without a usable answer (model unreachable, out of budget, …)
     citations: list[Citation]
     unmatched: list[int]  # markers the model wrote that no search result backs
-    feedback: bool | None = None  # the viewer's rating: 有帮助 / 没帮助 / not rated
+    feedback: bool | None = None  # the viewer's rating: helpful / not helpful / not rated
 
 
 @dataclass
@@ -92,28 +90,33 @@ def _clip(text: str, limit: int = 200) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _tool_detail(start: ToolStarted, result: ToolResultEvent | None) -> str | None:
+def _proposal_outcome(content: str, texts: Texts) -> str:
+    stage = ANY_PROPOSED.get(content)
+    return texts.proposed[stage][1] if stage else texts.submitted
+
+
+def _tool_detail(start: ToolStarted, result: ToolResultEvent | None, texts: Texts) -> str | None:
     if start.name == "propose_knowledge":
         title = f"“{_clip(str(start.arguments.get('title', '')), 80)}”"
         if result is None:
             return title
-        outcome = "失败" if result.is_error else _PROPOSAL_OUTCOME.get(result.content, "已提交")
+        outcome = texts.failed if result.is_error else _proposal_outcome(result.content, texts)
         return f"{title} → {outcome}"
     query = start.arguments.get("query")
     head = f"“{_clip(str(query), 80)}”" if query is not None else None
     if result is None:
         return head
     if result.is_error:
-        tail = "失败"
+        tail = texts.failed
     else:
         found = len(_NUMBERED.findall(result.content))
-        tail = f"{found} 条" if found else "没有找到"
-        if result.content.startswith(PARTIAL):
-            tail += "（部分结果）"
+        tail = texts.found(found) if found else texts.none_found
+        if result.content.startswith(ANY_PARTIAL):
+            tail += texts.partial_tail
     return f"{head} → {tail}" if head else tail
 
 
-def _project(events: Sequence[Event]) -> list[_Open]:
+def _project(events: Sequence[Event], texts: Texts) -> list[_Open]:
     steps: list[_Open] = []
     open_tools: dict[str, tuple[_Open, ToolStarted]] = {}  # call id -> its step and start
     run_started: dict[str, datetime] = {}
@@ -145,13 +148,13 @@ def _project(events: Sequence[Event]) -> list[_Open]:
     for e in events:
         run_started.setdefault(e.run_id, e.time)
         if isinstance(e, UserMessage) and e.origin == "task":
-            add(e, "question", "问题", detail=_clip(e.text))
+            add(e, "question", texts.step_question, detail=_clip(e.text))
         elif isinstance(e, ModelTurn):
             ends = e.stop != "tool_calls"
             add(
                 e,
                 "answer" if ends else "thinking",
-                "生成回答" if ends else "分析问题",
+                texts.step_answer if ends else texts.step_thinking,
                 duration_ms=_ms(previous, e.time) if previous else None,
                 usage=_usage(e.usage),
             )
@@ -159,9 +162,9 @@ def _project(events: Sequence[Event]) -> list[_Open]:
             add(
                 e,
                 "tool",
-                TOOL_TITLES.get(e.name, e.name),
+                texts.tool_titles.get(e.name, e.name),
                 status="running",
-                detail=_tool_detail(e, None),
+                detail=_tool_detail(e, None, texts),
             )
             open_tools[e.call_id] = (steps[-1], e)
         elif isinstance(e, ToolResultEvent) and e.call_id in open_tools:
@@ -169,7 +172,7 @@ def _project(events: Sequence[Event]) -> list[_Open]:
             opened.step = opened.step.model_copy(
                 update={
                     "status": "error" if e.is_error else "ok",
-                    "detail": _tool_detail(start, e),
+                    "detail": _tool_detail(start, e, texts),
                     "duration_ms": _ms(start.time, e.time),
                 }
             )
@@ -178,7 +181,7 @@ def _project(events: Sequence[Event]) -> list[_Open]:
             add(
                 e,
                 "error",
-                "模型调用失败",
+                texts.step_model_error,
                 status="error",
                 detail=e.error,
                 usage=_usage(e.usage) if e.usage else None,
@@ -188,7 +191,7 @@ def _project(events: Sequence[Event]) -> list[_Open]:
             add(
                 e,
                 "finished",
-                "失败" if failed else "完成",
+                texts.failed if failed else texts.step_done,
                 status="error" if failed else "ok",
                 duration_ms=_ms(run_started[e.run_id], e.time),
                 usage=_usage(e.usage),
@@ -197,20 +200,22 @@ def _project(events: Sequence[Event]) -> list[_Open]:
     return steps
 
 
-def project_steps(events: Sequence[Event]) -> list[Step]:
-    return [o.step for o in _project(events)]
+def project_steps(events: Sequence[Event], *, texts: Texts = ZH) -> list[Step]:
+    return [o.step for o in _project(events, texts)]
 
 
-def changes(events: Sequence[Event], after_seq: int) -> list[tuple[int, Step]]:
+def changes(
+    events: Sequence[Event], after_seq: int, *, texts: Texts = ZH
+) -> list[tuple[int, Step]]:
     """(cursor, step) for every step that changed after event `after_seq`: new ones, and a tool
     step whose result came later (sent again under its own `seq`, so the page replaces it).
     Ordered by cursor, so a stream that resumes after any cursor it sent misses nothing."""
-    changed = [(o.last_seq, o.step) for o in _project(events) if o.last_seq > after_seq]
+    changed = [(o.last_seq, o.step) for o in _project(events, texts) if o.last_seq > after_seq]
     return sorted(changed, key=lambda c: c[0])
 
 
-def steps_after(events: Sequence[Event], after_seq: int) -> list[Step]:
-    return [step for _, step in changes(events, after_seq)]
+def steps_after(events: Sequence[Event], after_seq: int, *, texts: Texts = ZH) -> list[Step]:
+    return [step for _, step in changes(events, after_seq, texts=texts)]
 
 
 def project_answer(

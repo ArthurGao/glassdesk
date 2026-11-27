@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from glassdesk.agent import build_agent
 from glassdesk.auth import CurrentUser
 from glassdesk.db import Deps
+from glassdesk.i18n import texts_for
 from glassdesk.runs import Busy, Runs
 from glassdesk.steward import Passage
 from glassdesk.suggestions import open_cards
@@ -46,7 +47,6 @@ log = logging.getLogger(__name__)
 
 POLL_S = 0.25
 CLAIM_WAIT_S = 3.0  # a run that just answered is still writing its usage row
-NEW_TITLE = "新会话"
 TITLE_CHARS = 30
 
 conversations = Table(
@@ -89,7 +89,6 @@ answer_feedback = Table(
     Column("helpful", Boolean, nullable=False),
     Column("updated_at", DateTime(timezone=True), server_default=func.now()),
 )
-FAILED_MESSAGE = "这次回答没有完成，请重试。"
 
 
 class ConversationOut(BaseModel):
@@ -219,11 +218,12 @@ async def _session_exists(sessions: SessionStore, session_id: str) -> bool:
 
 @router.post("", status_code=201)
 async def create_conversation(request: Request, user: CurrentUser) -> ConversationOut:
+    title = texts_for(request).new_title
     async with _deps(request).engine.begin() as conn:
         row = (
             await conn.execute(
                 insert(conversations)
-                .values(id=uuid.uuid4(), user_id=user.id, title=NEW_TITLE)
+                .values(id=uuid.uuid4(), user_id=user.id, title=title)
                 .returning(conversations)
             )
         ).one()
@@ -246,20 +246,21 @@ async def list_conversations(request: Request, user: CurrentUser) -> list[Conver
 @router.post("/{conversation_id}/messages", status_code=202)
 async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser) -> RunOut:
     deps, runs, settings = _deps(request), _runs(request), request.app.state.settings
+    texts = texts_for(request)
     if deps.model is None or deps.sessions is None or deps.steward is None:
-        raise HTTPException(503, "模型或知识库未配置")
+        raise HTTPException(503, texts.not_configured)
     try:
         run_id = uuid.uuid4().hex
         await runs.claim_waiting(conv.id, run_id, timeout_s=CLAIM_WAIT_S)
     except Busy:
-        raise HTTPException(409, "上一个问题还在处理中") from None
+        raise HTTPException(409, texts.busy) from None
     try:
         first = conv.agent_session_id is None
         session_id = conv.agent_session_id or uuid.uuid4().hex
         first_n = await _next_citation_number(deps.engine, conv.id)
         values: dict[str, object] = {"agent_session_id": session_id, "updated_at": func.now()}
         if first:
-            values["title"] = body.text.strip()[:TITLE_CHARS] or NEW_TITLE
+            values["title"] = body.text.strip()[:TITLE_CHARS] or texts.new_title
         async with deps.engine.begin() as conn:
             await conn.execute(
                 update(conversations).where(conversations.c.id == conv.id).values(**values)
@@ -294,6 +295,7 @@ async def ask(body: MessageIn, conv: Owned, request: Request, user: CurrentUser)
             brand_name=settings.brand_name,
             on_passages=keep,
             first_n=first_n,
+            texts=texts,
         )
         sessions, steward = deps.sessions, deps.steward
         answered: list[str] = []  # the run's final text, for the episode
@@ -361,7 +363,7 @@ async def get_steps(
     conv: Owned, request: Request, after: Annotated[int, Query(ge=0)] = 0
 ) -> list[Step]:
     deps = _deps(request)
-    return steps_after(await _events(deps, conv.agent_session_id), after)
+    return steps_after(await _events(deps, conv.agent_session_id), after, texts=texts_for(request))
 
 
 @router.get("/{conversation_id}/answers")
@@ -443,7 +445,7 @@ async def stream(
     as it finished (steward may still be reading the episode); then `suggestions` (open cards),
     `failed` for a run that could not finish, and `end`: without it a browser's EventSource
     reconnects when the stream closes."""
-    deps, runs = _deps(request), _runs(request)
+    deps, runs, texts = _deps(request), _runs(request), texts_for(request)
     cursor = int(last_event_id) if last_event_id and last_event_id.isdigit() else after
     events: list[Event] = []
     answered = False
@@ -453,7 +455,7 @@ async def stream(
         read_after = events[-1].seq if events else 0
         events.extend(await _events(deps, conv.agent_session_id, read_after))  # only what is new
         start = cursor
-        for at, step in changes(events, cursor):
+        for at, step in changes(events, cursor, texts=texts):
             yield ServerSentEvent(data=step, event="step", id=str(at))
             cursor = at
         # every run that finished since the last read, in order (several after a reconnect)
@@ -469,7 +471,9 @@ async def stream(
     if failed is not None and not any(
         isinstance(e, RunFinished) and e.run_id == failed for e in events
     ):
-        yield ServerSentEvent(data={"run_id": failed, "message": FAILED_MESSAGE}, event="failed")
+        yield ServerSentEvent(
+            data={"run_id": failed, "message": texts.failed_message}, event="failed"
+        )
     else:
         if not answered:  # attached to a finished conversation: its last answer
             answers = await _answers(deps.engine, conv.id, conv.user_id, events, last_only=True)

@@ -71,6 +71,10 @@ export type Branding = {
      */
     name: string;
     /**
+     * Locale
+     */
+    locale: 'zh' | 'en';
+    /**
      * Color
      */
     color: string;

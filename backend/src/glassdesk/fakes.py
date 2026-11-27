@@ -6,7 +6,8 @@ import re
 from lite_model import AssistantTurn, Message, Text, ToolCall, ToolResults
 from lite_model.testing import AsyncFakeModel, FakeTurnCall
 
-from glassdesk.agent import NOT_FOUND, PROPOSED, ROLE
+from glassdesk.agent import ROLE
+from glassdesk.i18n import ANY_PROPOSED, ZH
 from glassdesk.steward import Passage
 
 DEMO_PASSAGES = (
@@ -39,12 +40,12 @@ def _reply(call: FakeTurnCall) -> AssistantTurn:
     """ "记住…" proposes the fact; any other question is searched and answered citing the first
     passage found."""
     last = call.messages[-1]
-    if isinstance(last, ToolResults) and last.results[0].content in dict(PROPOSED.values()):
+    if isinstance(last, ToolResults) and last.results[0].content in ANY_PROPOSED:
         return AssistantTurn((Text(f"好的，{last.results[0].content}"),))
     if isinstance(last, ToolResults):
         found = _FIRST.search(last.results[0].content)
         if found is None:
-            return AssistantTurn((Text(NOT_FOUND),))
+            return AssistantTurn((Text(ZH.not_found),))
         n, title = found.groups()
         return AssistantTurn((Text(f"根据《{title}》，相关规定见引用[{n}]。"),))
     question = last.content if isinstance(last, Message) else ""

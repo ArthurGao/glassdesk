@@ -15,6 +15,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from glassdesk.auth import CurrentUser, Reviewer
 from glassdesk.db import Deps
+from glassdesk.i18n import texts_for
 from glassdesk.steward import Candidate, Document, Entry
 from glassdesk.users import User, metadata
 from glassdesk.web import DecisionOut, Steward
@@ -113,21 +114,23 @@ async def list_documents(steward: Steward, user: CurrentUser) -> list[DocumentOu
 
 @router.post("/documents", status_code=201)
 async def upload_document(
+    request: Request,
     steward: Steward,
     user: CurrentUser,
     file: Annotated[UploadFile, File()],
     title: Annotated[str | None, Form(max_length=200)] = None,
 ) -> UploadedOut:
+    texts = texts_for(request)
     filename = PurePath(file.filename or "").name
     if PurePath(filename).suffix.lower() not in UPLOAD_TYPES:
-        raise HTTPException(422, "只支持 PDF、Word、Markdown、TXT、HTML 文件")
+        raise HTTPException(422, texts.upload_types)
     if file.size is not None and file.size > MAX_UPLOAD_BYTES:  # known before reading
-        raise HTTPException(422, "文件不能超过 20 MB")
+        raise HTTPException(422, texts.upload_too_big)
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if not data:
-        raise HTTPException(422, "文件是空的")
+        raise HTTPException(422, texts.upload_empty)
     if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(422, "文件不能超过 20 MB")
+        raise HTTPException(422, texts.upload_too_big)
     mime = file.content_type or "application/octet-stream"
     document, candidate = await steward.upload_document(filename, data, mime, title=title or None)
     return UploadedOut(document=_out(DocumentOut, document), candidate=_candidate(candidate))

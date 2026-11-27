@@ -1,25 +1,26 @@
 import { useQuery } from '@tanstack/react-query'
 import { insights } from '@/client/sdk.gen'
 import type { DayOut } from '@/client/types.gen'
-import { ENTRY_STATUS } from '@/lib/labels'
+import { label, type Messages, useT } from '@/lib/i18n'
 import { insightsKeys } from './keys'
 
 /** Unknown cost is never 0: all unknown shows "unknown"; some unknown shows the known sum and how
  * many runs did not report one. */
-function cost(d: DayOut): string {
-  if (d.cost_usd == null) return d.answers ? '未知' : '—'
+function cost(d: DayOut, t: Messages): string {
+  if (d.cost_usd == null) return d.answers ? t.unknown : '—'
   const known = '$' + d.cost_usd.toFixed(4)
-  return d.cost_unknown_runs ? known + '（' + d.cost_unknown_runs + ' 次未知）' : known
+  return d.cost_unknown_runs ? known + t.insights.unknownRuns(d.cost_unknown_runs) : known
 }
 
 
 /** Known tokens, with how many runs reported none (they are not in the number). */
-function tokens(d: DayOut): string {
+function tokens(d: DayOut, t: Messages): string {
   const known = d.tokens.toLocaleString()
-  return d.tokens_unknown_runs ? known + '（' + d.tokens_unknown_runs + ' 次未知）' : known
+  return d.tokens_unknown_runs ? known + t.insights.unknownRuns(d.tokens_unknown_runs) : known
 }
 
 export function InsightsPage() {
+  const tr = useT()
   const query = useQuery({
     queryKey: insightsKeys.all,
     queryFn: async () => {
@@ -32,29 +33,29 @@ export function InsightsPage() {
   if (query.isError) {
     return (
       <p role="alert" className="p-6 text-red-600">
-        洞察暂时无法加载，请稍后再试。
+        {tr.insights.loadFailed}
       </p>
     )
   }
-  if (query.data === 'forbidden') return <p className="p-6 text-slate-500">需要审核权限才能查看洞察。</p>
+  if (query.data === 'forbidden') return <p className="p-6 text-slate-500">{tr.insights.forbidden}</p>
   const body = query.data
-  if (!body) return <p className="p-6 text-slate-500">加载中…</p>
+  if (!body) return <p className="p-6 text-slate-500">{tr.loading}</p>
   const t = body.totals
-  const rate = body.helpful_rate == null ? '—' : Math.round(body.helpful_rate * 100) + '%（' + body.rated + ' 次评价）'
+  const rate = body.helpful_rate == null ? '—' : Math.round(body.helpful_rate * 100) + '%' + tr.insights.rated(body.rated)
   const tiles: Array<[string, string]> = [
-    ['回答', String(t.answers)],
-    ['失败', String(t.failed)],
-    ['tokens', tokens(t)],
-    ['成本', cost(t)],
-    ['好评率', rate],
+    [tr.insights.answers, String(t.answers)],
+    [tr.insights.failed, String(t.failed)],
+    ['tokens', tokens(t, tr)],
+    [tr.insights.cost, cost(t, tr)],
+    [tr.insights.helpfulRate, rate],
   ]
   return (
     <div className="h-full space-y-6 overflow-y-auto p-6 text-sm">
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold">最近 7 天</h1>
-        {body.demo && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">演示数据</span>}
+        <h1 className="text-lg font-semibold">{tr.insights.lastWeek}</h1>
+        {body.demo && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{tr.insights.demo}</span>}
       </div>
-      <ul aria-label="概览" className="grid grid-cols-5 gap-3">
+      <ul aria-label={tr.insights.overview} className="grid grid-cols-5 gap-3">
         {tiles.map(([label, value]) => (
           <li key={label} className="rounded border border-slate-200 bg-white p-3">
             <div className="text-slate-500">{label}</div>
@@ -64,7 +65,7 @@ export function InsightsPage() {
       </ul>
       <table className="w-full bg-white">
         <thead className="text-left text-slate-500">
-          <tr><th className="p-2">日期</th><th className="p-2">回答</th><th className="p-2">失败</th><th className="p-2">tokens</th><th className="p-2">成本</th></tr>
+          <tr><th className="p-2">{tr.insights.day}</th><th className="p-2">{tr.insights.answers}</th><th className="p-2">{tr.insights.failed}</th><th className="p-2">tokens</th><th className="p-2">{tr.insights.cost}</th></tr>
         </thead>
         <tbody>
           {body.days.map((d) => (
@@ -72,21 +73,21 @@ export function InsightsPage() {
               <td className="p-2">{d.day}</td>
               <td className="p-2">{d.answers}</td>
               <td className="p-2">{d.failed}</td>
-              <td className="p-2">{tokens(d)}</td>
-              <td className="p-2">{cost(d)}</td>
+              <td className="p-2">{tokens(d, tr)}</td>
+              <td className="p-2">{cost(d, tr)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <section className="space-y-2">
-        <h2 className="font-medium">知识库</h2>
+        <h2 className="font-medium">{tr.insights.kb}</h2>
         {body.kb ? (
           <>
             <p className="text-slate-600">
-              {Object.entries(body.kb.entries_by_status).map(([s, n]) => (ENTRY_STATUS[s] ?? s) + ' ' + n).join(' · ')}
-              {' · '}<span>待审核 {body.kb.pending_reviews}</span>{' · '}待确认 {body.kb.awaiting_user}
+              {Object.entries(body.kb.entries_by_status).map(([s, n]) => label(tr.entryStatus, s) + ' ' + n).join(' · ')}
+              {' · '}<span>{tr.insights.pendingReviews} {body.kb.pending_reviews}</span>{' · '}{tr.insights.awaitingUser} {body.kb.awaiting_user}
             </p>
-            <h3 className="text-slate-500">知识库缺什么（检索不到好结果的问题）</h3>
+            <h3 className="text-slate-500">{tr.insights.gaps}</h3>
             <ul className="list-disc pl-5">
               {body.kb.gaps.map((g) => (
                 <li key={g.query}><span>{g.query}</span> <span className="text-slate-400">×{g.count}</span></li>
@@ -94,7 +95,7 @@ export function InsightsPage() {
             </ul>
           </>
         ) : (
-          <p className="text-slate-500">知识库统计未配置</p>
+          <p className="text-slate-500">{tr.insights.kbNotConfigured}</p>
         )}
       </section>
     </div>

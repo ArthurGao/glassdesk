@@ -1,6 +1,8 @@
 # The deployment's steward namespace (applied by bootstrap.sh: `steward ns apply -f`). Edit the
 # keywords for the customer: an entry, suggestion or document title containing one goes to the
-# review queue, never live on its own.
+# review queue, never live on its own. Matching ignores case; keep the words of the deployment's
+# LOCALE (both lists can stay).
 slug: glassdesk
 kb:
-  high_risk_keywords: [价格, 报价, 政策, 法务, 合同, 医疗, 安全]
+  high_risk_keywords: [价格, 报价, 政策, 法务, 合同, 医疗, 安全,
+                       price, pricing, quote, policy, legal, contract, medical, security]

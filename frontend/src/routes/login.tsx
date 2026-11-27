@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { type FormEvent, useState } from 'react'
 import { login } from '@/client/sdk.gen'
 import { brandingQuery } from '@/lib/branding'
+import { useT } from '@/lib/i18n'
 import { meQuery } from '@/lib/session'
 
 export const Route = createFileRoute('/login')({ component: LoginPage })
@@ -15,6 +16,7 @@ function LoginPage() {
   const queryClient = useQueryClient()
   const { data: brand } = useQuery(brandingQuery)
   const navigate = useNavigate()
+  const t = useT()
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
@@ -23,7 +25,7 @@ function LoginPage() {
     try {
       const { data, response } = await login({ body: { username, password } })
       if (!data) {
-        setError(response?.status === 401 ? '用户名或密码错误' : '登录失败，请稍后再试')
+        setError(response?.status === 401 ? t.login.wrong : t.login.failed)
         setPassword('')
         return
       }
@@ -37,9 +39,9 @@ function LoginPage() {
   return (
     <div className="flex h-screen items-center justify-center bg-slate-50">
       <form onSubmit={onSubmit} className="w-80 space-y-4 rounded-lg border border-slate-200 bg-white p-6">
-        <h1 className="text-lg font-semibold">登录 {brand?.name}</h1>
+        <h1 className="text-lg font-semibold">{t.login.title(brand?.name ?? '')}</h1>
         <label className="block text-sm">
-          用户名
+          {t.login.username}
           <input
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
             value={username}
@@ -49,7 +51,7 @@ function LoginPage() {
           />
         </label>
         <label className="block text-sm">
-          密码
+          {t.login.password}
           <input
             type="password"
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1"
@@ -69,7 +71,7 @@ function LoginPage() {
           disabled={busy}
           className="w-full rounded bg-slate-900 py-1.5 text-sm text-white disabled:opacity-50"
         >
-          登录
+          {t.login.submit}
         </button>
       </form>
     </div>

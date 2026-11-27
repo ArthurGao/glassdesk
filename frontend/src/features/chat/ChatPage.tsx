@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { createConversation, getAnswers, listConversations } from '@/client/sdk.gen'
 import { brandingQuery } from '@/lib/branding'
+import { useT } from '@/lib/i18n'
 import { AnswerFeedback } from './AnswerFeedback'
 import { AnswerText } from './CitationChip'
 import { Composer } from './Composer'
@@ -11,11 +12,10 @@ import { chatKeys } from './keys'
 import { TimelinePanel } from './TimelinePanel'
 import { useStepStream } from './useStepStream'
 
-const FAILED = '这次回答没有完成，请重试。'
-
 export function ChatPage({ conversationId }: { conversationId?: string }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const t = useT()
   const conversations = useQuery({
     queryKey: chatKeys.conversations,
     queryFn: async () => (await listConversations({ throwOnError: true })).data,
@@ -41,9 +41,9 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
 
   return (
     <div className="flex h-full">
-      <nav aria-label="会话" className="w-56 border-r border-slate-200 bg-white p-2 text-sm">
+      <nav aria-label={t.chat.conversations} className="w-56 border-r border-slate-200 bg-white p-2 text-sm">
         <button type="button" onClick={() => onNew()} className="mb-2 w-full rounded border border-slate-300 py-1">
-          + 新会话
+          {t.chat.newConversation}
         </button>
         <ul className="space-y-1">
           {conversations.data?.map((c) => (
@@ -68,7 +68,7 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
                   <QuestionBubble text={a.question} />
                   <div className="max-w-[80%] rounded border border-slate-200 bg-white px-3 py-2">
                     {a.failed ? (
-                      <p className="text-slate-500">{FAILED}</p>
+                      <p className="text-slate-500">{t.chat.failed}</p>
                     ) : (
                       <>
                         <AnswerText answer={a} />
@@ -101,7 +101,7 @@ export function ChatPage({ conversationId }: { conversationId?: string }) {
           </>
         ) : (
           <div className="space-y-3 p-6 text-sm">
-            <p className="text-slate-700">{brand?.welcome || '新建一个会话开始提问。'}</p>
+            <p className="text-slate-700">{brand?.welcome || t.chat.emptyWelcome}</p>
             {brand?.examples.length ? (
               <div className="flex flex-wrap gap-2">
                 {brand.examples.map((q) => (

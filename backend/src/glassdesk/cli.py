@@ -80,12 +80,15 @@ async def run(args: argparse.Namespace | Sequence[str], *, deps: Deps | None = N
         print("migrated")
         return 0
     if args.command == "seed":
+        from glassdesk.i18n import TEXTS
         from glassdesk.seed import seed_demo
         from glassdesk.steward import HttpSteward
 
-        steward = HttpSteward.from_settings(Settings())
+        settings = Settings()
+        steward = HttpSteward.from_settings(settings)
         try:
-            print(f"demo entries written: {await seed_demo(steward)}")
+            written = await seed_demo(steward, texts=TEXTS[settings.locale])
+            print(f"demo entries written: {written}")
         finally:
             await steward.aclose()
         return 0
@@ -106,7 +109,9 @@ async def run(args: argparse.Namespace | Sequence[str], *, deps: Deps | None = N
         deps = build_deps(Settings())
     try:
         password = (
-            sys.stdin.readline().rstrip("\n") if args.password_stdin else getpass.getpass("密码：")
+            sys.stdin.readline().rstrip("\n")
+            if args.password_stdin
+            else getpass.getpass("Password: ")
         )
         if not password:
             print("password must not be empty", file=sys.stderr)

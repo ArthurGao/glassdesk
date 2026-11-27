@@ -6,6 +6,8 @@ from lite_model import ModelsConfig
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from glassdesk.i18n import Locale
+
 DEFAULT_DB_SCHEMA = "glassdesk"
 DEFAULT_AGENT_SCHEMA = "lite_agent"
 
@@ -25,11 +27,12 @@ class Settings(BaseSettings):
     steward_api_key: SecretStr
     steward_review_key: SecretStr
     steward_collection: str = "company"
-    # steward's Admin API (insights: KB gaps and counts); both unset: insights show "未配置"
+    # steward's Admin API (insights: KB gaps and counts); both unset: insights say "not configured"
     steward_admin_token: SecretStr | None = None
     steward_namespace: str | None = None
     timezone: str = "Asia/Shanghai"  # the deployment's local days, for insights
     session_secret: SecretStr = Field(min_length=32)
+    locale: Locale = "zh"  # the UI's language: every page, the agent's prompt, error details
     brand_name: str = "glassdesk"
     brand_color: str = Field(default="#0f172a", pattern=r"^#[0-9a-fA-F]{6}$")  # only a colour
     brand_welcome: str = ""  # shown above an empty chat

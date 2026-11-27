@@ -1,11 +1,12 @@
 import { CircleAlert, CircleCheck, LoaderCircle } from 'lucide-react'
 import type { Step, Usage } from '@/client/types.gen'
+import { useT } from '@/lib/i18n'
 
 const tokens = (u: Usage) => (u.input ?? 0) + (u.output ?? 0)
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`
 
-function formatCost(cost: number | null | undefined) {
-  return cost == null ? '未知' : `$${cost.toFixed(4)}`
+function formatCost(cost: number | null | undefined, unknown: string) {
+  return cost == null ? unknown : `$${cost.toFixed(4)}`
 }
 
 const ICON = {
@@ -16,14 +17,15 @@ const ICON = {
 
 /** The latest run's steps, as the agent took them (design §6). */
 export function TimelinePanel({ steps }: { steps: Step[] }) {
+  const t = useT()
   const lastRun = steps.at(-1)?.run_id
   const shown = steps.filter((s) => s.run_id === lastRun)
   const finished = shown.find((s) => s.kind === 'finished')
   return (
-    <aside aria-label="执行过程" className="flex w-80 flex-col border-l border-slate-200 bg-white">
-      <h2 className="border-b border-slate-200 px-4 py-2 text-sm font-medium">执行过程</h2>
+    <aside aria-label={t.timeline.title} className="flex w-80 flex-col border-l border-slate-200 bg-white">
+      <h2 className="border-b border-slate-200 px-4 py-2 text-sm font-medium">{t.timeline.title}</h2>
       {shown.length === 0 ? (
-        <p className="p-4 text-sm text-slate-500">提问后，这里会显示助手的每一步。</p>
+        <p className="p-4 text-sm text-slate-500">{t.timeline.empty}</p>
       ) : (
         <ol className="flex-1 space-y-2 overflow-y-auto p-4 text-sm">
           {shown.map((s) => (
@@ -43,8 +45,8 @@ export function TimelinePanel({ steps }: { steps: Step[] }) {
       )}
       {finished && (
         <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-600">
-          <span>{finished.usage ? tokens(finished.usage) : '?'} tokens</span> · <span>成本 {formatCost(finished.usage?.cost_usd)}</span>
-          {finished.duration_ms != null && ` · 总耗时 ${secs(finished.duration_ms)}`}
+          <span>{finished.usage ? tokens(finished.usage) : '?'} tokens</span> · <span>{t.timeline.cost} {formatCost(finished.usage?.cost_usd, t.unknown)}</span>
+          {finished.duration_ms != null && ` · ${t.timeline.total} ${secs(finished.duration_ms)}`}
         </div>
       )}
     </aside>
