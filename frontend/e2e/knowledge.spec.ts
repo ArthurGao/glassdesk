@@ -45,3 +45,25 @@ test('a high-risk entry waits for review and a reviewer approves it', async ({ p
   await page.getByRole('tab', { name: '条目' }).click()
   await expect(page.getByRole('row').filter({ hasText: title })).toContainText('已验证')
 })
+
+test('a reviewer deprecates an entry after confirming in the dialog', async ({ page }) => {
+  const title = `会议室规则 ${Date.now() % 100000}`
+  await login(page)
+  await page.getByRole('link', { name: '知识库' }).click()
+  await page.getByRole('button', { name: '新建条目' }).click()
+  await page.getByLabel('标题').fill(title)
+  await page.getByLabel('内容').fill('单次最长 2 小时')
+  await page.getByRole('button', { name: '保存' }).click()
+  await expect(page.getByRole('status')).toContainText('已存入知识库')
+
+  const row = page.getByRole('row').filter({ hasText: title })
+  await expect(row).toContainText('生效')
+  await row.getByRole('button', { name: '停用' }).click()
+  const dialog = page.getByRole('dialog', { name: '停用这个条目？' })
+  await expect(dialog).toContainText(title)
+  await dialog.getByLabel('原因（可选）').fill('已过时')
+  await dialog.getByRole('button', { name: '停用' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(row).toContainText('已停用')
+  await expect(row.getByRole('button', { name: '停用' })).toHaveCount(0)
+})

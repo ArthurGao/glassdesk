@@ -27,7 +27,8 @@ review_audit = Table(
     "review_audit",
     metadata,
     Column("id", UUID(as_uuid=True), primary_key=True),
-    Column("candidate_id", Text, nullable=False),
+    Column("candidate_id", Text),  # what an approve / reject decided
+    Column("entry_id", Text),  # what a deprecate took out of use
     Column("user_id", UUID(as_uuid=True), nullable=False),
     Column("action", Text, nullable=False),
     Column("note", Text),
@@ -88,6 +89,10 @@ class ReviewIn(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
+class DeprecateIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
 def _out[T: BaseModel](model: type[T], value: Entry | Document | Candidate) -> T:
     return model.model_validate(value, from_attributes=True)
 
@@ -105,6 +110,15 @@ async def list_entries(steward: Steward, user: CurrentUser) -> list[EntryOut]:
 async def create_entry(body: EntryIn, steward: Steward, user: CurrentUser) -> WrittenOut:
     written = await steward.create_entry(body.title, body.content, author=user.username)
     return WrittenOut.model_validate(written, from_attributes=True)
+
+
+@router.post("/entries/{entry_id}/deprecate")
+async def deprecate_entry(
+    entry_id: uuid.UUID, body: DeprecateIn, request: Request, steward: Steward, user: Reviewer
+) -> EntryOut:
+    entry = await steward.deprecate(str(entry_id))
+    await _audit(request, user, action="deprecate", entry_id=str(entry_id), note=body.reason)
+    return _out(EntryOut, entry)
 
 
 @router.get("/documents")
@@ -141,6 +155,30 @@ async def list_reviews(steward: Steward, user: Reviewer) -> list[CandidateOut]:
     return [_out(CandidateOut, c) for c in await steward.list_candidates(stage="awaiting_review")]
 
 
+async def _audit(
+    request: Request,
+    user: User,
+    *,
+    action: Literal["approve", "reject", "deprecate"],
+    note: str | None,
+    candidate_id: str | None = None,
+    entry_id: str | None = None,
+) -> None:
+    """Who did what: steward sees one review key, so the person is only known here."""
+    deps: Deps = request.app.state.deps
+    async with deps.engine.begin() as conn:
+        await conn.execute(
+            insert(review_audit).values(
+                id=uuid.uuid4(),
+                candidate_id=candidate_id,
+                entry_id=entry_id,
+                user_id=user.id,
+                action=action,
+                note=note,
+            )
+        )
+
+
 async def _review(
     request: Request,
     steward: Steward,
@@ -161,17 +199,7 @@ async def _review(
         user_id=None,
         note=f"{user.username}: {note}" if note else user.username,
     )
-    deps: Deps = request.app.state.deps
-    async with deps.engine.begin() as conn:
-        await conn.execute(
-            insert(review_audit).values(
-                id=uuid.uuid4(),
-                candidate_id=candidate_id,
-                user_id=user.id,
-                action=action,
-                note=note,
-            )
-        )
+    await _audit(request, user, action=action, candidate_id=candidate_id, note=note)
     return DecisionOut.of(decision)
 
 

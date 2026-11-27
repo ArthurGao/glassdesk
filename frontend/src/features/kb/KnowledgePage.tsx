@@ -1,14 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
+import type { EntryOut } from '@/client/types.gen'
 import {
   approve,
   createEntry,
+  deprecateEntry,
   listDocuments,
   listEntries,
   listReviews,
   reject,
   uploadDocument,
 } from '@/client/sdk.gen'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { isSettled } from '@/lib/api'
 import { label, useT } from '@/lib/i18n'
 import { meQuery } from '@/lib/session'
@@ -40,14 +43,14 @@ export function KnowledgePage() {
           </button>
         ))}
       </div>
-      {tab === 'entries' && <Entries />}
+      {tab === 'entries' && <Entries canReview={canReview} />}
       {tab === 'documents' && <Documents />}
       {tab === 'reviews' && canReview && <Reviews />}
     </div>
   )
 }
 
-function Entries() {
+function Entries({ canReview }: { canReview: boolean }) {
   const queryClient = useQueryClient()
   const t = useT()
   const entries = useQuery({
@@ -60,6 +63,7 @@ function Entries() {
   const [notice, setNotice] = useState<string | null>(null)
   // steward judges the entry's risk with a model before it answers (tens of seconds locally)
   const [saving, setSaving] = useState(false)
+  const [deprecating, setDeprecating] = useState<EntryOut | null>(null)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
@@ -105,7 +109,7 @@ function Entries() {
       )}
       <table className="w-full bg-white">
         <thead className="text-left text-slate-500">
-          <tr><th className="p-2">{t.kb.title}</th><th className="p-2">{t.kb.status}</th><th className="p-2">{t.kb.risk}</th><th className="p-2">{t.kb.hits}</th></tr>
+          <tr><th className="p-2">{t.kb.title}</th><th className="p-2">{t.kb.status}</th><th className="p-2">{t.kb.risk}</th><th className="p-2">{t.kb.hits}</th>{canReview && <th className="p-2" />}</tr>
         </thead>
         <tbody>
           {entries.data?.map((e) => (
@@ -114,11 +118,62 @@ function Entries() {
               <td className="p-2">{label(t.entryStatus, e.status)}</td>
               <td className="p-2">{label(t.kb.riskLevel, e.risk_level)}</td>
               <td className="p-2">{e.hit_count ?? '—'}</td>
+              {canReview && (
+                <td className="p-2 text-right">
+                  {e.status !== 'deprecated' && (
+                    <button type="button" onClick={() => setDeprecating(e)} className="rounded border border-slate-300 px-2 py-1">
+                      {t.kb.deprecate}
+                    </button>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
+      {deprecating && <DeprecateDialog entry={deprecating} onClose={() => setDeprecating(null)} />}
     </section>
+  )
+}
+
+function DeprecateDialog({ entry, onClose }: { entry: EntryOut; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const t = useT()
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onConfirm() {
+    setBusy(true)
+    setError(null)
+    const { response } = await deprecateEntry({
+      path: { entry_id: entry.id },
+      body: { reason: reason.trim() || null },
+    }).finally(() => setBusy(false))
+    // 404 / 409: gone or deprecated meanwhile; the refetch shows what it is now
+    if (!isSettled(response)) {
+      setError(t.actionFailed)
+      return
+    }
+    await queryClient.invalidateQueries({ queryKey: kbKeys.entries })
+    onClose()
+  }
+
+  return (
+    <ConfirmDialog
+      title={t.kb.deprecateTitle}
+      confirmLabel={busy ? t.kb.deprecating : t.kb.deprecate}
+      busy={busy}
+      error={error}
+      onConfirm={onConfirm}
+      onCancel={onClose}
+    >
+      <p className="text-slate-700">{t.kb.deprecateBody(entry.title)}</p>
+      <label className="block">
+        {t.kb.deprecateReason}
+        <textarea className="mt-1 min-h-16 w-full rounded border border-slate-300 px-2 py-1" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+      </label>
+    </ConfirmDialog>
   )
 }
 

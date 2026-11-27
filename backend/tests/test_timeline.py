@@ -16,6 +16,7 @@ from lite_agent.events import (
     UserMessage,
 )
 
+from glassdesk.i18n import EN, ZH
 from glassdesk.steward import Passage
 from glassdesk.timeline import project_answer, project_steps, steps_after
 
@@ -195,3 +196,75 @@ def test_a_proposal_step_shows_its_title_and_outcome() -> None:
     ]
     [step] = project_steps(events)
     assert (step.title, step.detail, step.status) == ("提议存入知识库", "“报销时限” → 待确认", "ok")
+
+
+def test_a_search_step_says_how_many_results_came_from_the_kb_and_from_memory() -> None:
+    kinds = {("r1", "c1"): {"entry": 4, "document": 1, "memory": 3}}
+    assert project_steps(run_events(), kinds=kinds)[2].detail == (
+        "“报销” → 8 条：知识库 5 条，记忆 3 条"
+    )
+    assert project_steps(run_events(), kinds=kinds, texts=EN)[2].detail == (
+        "“报销” → 8 results: 5 from the knowledge base, 3 from memory"
+    )
+    only_kb = {("r1", "c1"): {"entry": 2}}
+    assert project_steps(run_events(), kinds=only_kb, texts=EN)[2].detail == (
+        "“报销” → 2 results: 2 from the knowledge base"
+    )
+    # the stream resends the step under the same kinds
+    [tool, *_] = steps_after(run_events(), 5, kinds={("r1", "c1"): {"memory": 2}})
+    assert tool.detail == "“报销” → 2 条：记忆 2 条"
+
+
+def test_a_degraded_search_says_what_was_missing() -> None:
+    events = run_events()
+    result = events[5]
+    assert isinstance(result, ToolResultEvent)
+    events[5] = result.model_copy(
+        update={"content": "（记忆、重排序暂时不可用）\n" + result.content}
+    )
+    kinds = {("r1", "c1"): {"entry": 2}}
+    assert project_steps(events, kinds=kinds)[2].detail == (
+        "“报销” → 2 条：知识库 2 条（记忆、重排序暂时不可用）"
+    )
+    # recorded in zh, read in en
+    assert project_steps(events, kinds=kinds, texts=EN)[2].detail == (
+        "“报销” → 2 results: 2 from the knowledge base (memory and reranking unavailable)"
+    )
+
+
+def test_a_refused_second_proposal_is_not_shown_as_a_failure() -> None:
+    events: list[Event] = [
+        RunStarted(role="desk.answer", system="s", tools=(), **env(2)),
+        ToolStarted(
+            call_id="p2",
+            name="propose_knowledge",
+            arguments={"title": "报销时限", "content": "30 天", "reason": ""},
+            **env(3),
+        ),
+        ToolResultEvent(
+            call_id="p2",
+            content="AlreadyProposed: 这次回答已经提议过一条知识，不要重复提议。",
+            is_error=True,
+            error_kind="exception",
+            executed=True,
+            original_chars=10,
+            **env(4, ms=1),
+        ),
+    ]
+    [step] = project_steps(events)
+    assert (step.status, step.detail) == ("ok", "“报销时限” → 已提议过，未重复提交")
+
+
+def test_new_proposal_wording_still_maps_to_its_stage() -> None:
+    for stage, shown in (("awaiting_user", "待确认"), ("entry", "已存入（未审核）")):
+        events: list[Event] = [
+            ToolStarted(call_id="p1", name="propose_knowledge", arguments={"title": "t"}, **env(3)),
+            ToolResultEvent(
+                call_id="p1",
+                content=ZH.proposed[stage][0],
+                executed=True,
+                original_chars=10,
+                **env(4),
+            ),
+        ]
+        assert project_steps(events)[0].detail == f"“t” → {shown}"

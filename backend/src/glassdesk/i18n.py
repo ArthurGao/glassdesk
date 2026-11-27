@@ -1,8 +1,9 @@
 """User-facing copy per deployment locale (GLASSDESK_LOCALE, design §8). zh is the default and holds
 the copy glassdesk shipped with; en mirrors it key for key."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from itertools import combinations
 from typing import Literal
 
 from starlette.requests import Request
@@ -21,12 +22,17 @@ class Texts:
     propose_content: str
     propose_reason: str
     not_found: str
-    # partial and proposed[…][0] are stored in event logs and parsed back by the timeline: editing
-    # them leaves old logs unrecognised (ANY_PARTIAL / ANY_PROPOSED only know the current wording).
-    partial: str  # the first line of a search result when some source was down
+    # partial, unavailable(…), proposed[…][0] and already_proposed are stored in event logs and
+    # read back by the timeline: a wording that changes moves its old text to LEGACY_PROPOSED
+    # (or similar), or old logs go unrecognised.
+    partial: str  # a search result's first line when a source steward does not name was down
+    # a search result's first line naming the sources that were down, by their labels
+    unavailable: Callable[[Sequence[str]], str]
+    source_label: dict[str, str]  # steward's RetrieveOut.degraded values
     kind_label: dict[str, str]
     # propose_knowledge's outcome: (what the model is told, what the timeline shows)
     proposed: dict[str, tuple[str, str]]
+    already_proposed: str  # a second proposal in one answer, refused (the tool's error text)
     # The timeline
     tool_titles: dict[str, str]
     step_question: str
@@ -37,8 +43,11 @@ class Texts:
     failed: str
     submitted: str  # a proposal whose outcome the timeline does not recognise
     found: Callable[[int], str]
+    found_by_source: Callable[[int, int], str]  # (from the knowledge base, from memory)
     none_found: str
     partial_tail: str
+    tail_separator: str  # between a step's result count and the missing sources' line
+    already_proposed_tail: str
     # Conversations
     new_title: str
     failed_message: str
@@ -67,7 +76,8 @@ ZH = Texts(
 - 搜索结果里没有相关内容时，直接说没有找到，不要猜测。
 - 搜索失败时，告诉用户知识库暂时不可用。
 - 用户明确陈述或确认了一条值得团队长期使用的知识时，用 propose_knowledge 提议存入知识库；
-  不要提议你自己的推测，也不要提议搜索结果里已经有的内容。
+  不要提议你自己的推测，也不要提议搜索结果里已经有的内容。一次回答最多提议一条。
+- 除非工具结果明确这样说，否则不要告诉用户提议已经核实或已经存入。
 - 用用户提问的语言回答，简洁明了。""",
     search_description="搜索公司知识库和该用户的记忆，返回带编号的段落。",
     search_query="要搜索的问题或关键词",
@@ -77,12 +87,21 @@ ZH = Texts(
     propose_reason="为什么值得存入",
     not_found="没有找到相关内容。",
     partial="（部分来源暂时不可用）",
+    unavailable=lambda names: f"（{'、'.join(names)}暂时不可用）",
+    source_label={"memory": "记忆", "kb": "知识库", "rerank": "重排序"},
     kind_label={"memory": "记忆", "entry": "知识条目", "document": "文档"},
     proposed={
-        "awaiting_user": ("已提交，等待你确认。", "待确认"),
-        "awaiting_review": ("已提交，等待审核。", "待审核"),
-        "entry": ("已存入知识库。", "已存入"),
+        "awaiting_user": (
+            "已作为提议提交，等待用户确认；它还不在知识库里，也没有经过核实。",
+            "待确认",
+        ),
+        "awaiting_review": (
+            "已作为提议提交，等待审核员审核；它还不在知识库里，也没有经过核实。",
+            "待审核",
+        ),
+        "entry": ("已存入知识库，但没有经过审核，也没有经过核实。", "已存入（未审核）"),
     },
+    already_proposed="这次回答已经提议过一条知识，不要重复提议。",
     tool_titles={"search_knowledge": "搜索知识库", "propose_knowledge": "提议存入知识库"},
     step_question="问题",
     step_thinking="分析问题",
@@ -92,8 +111,18 @@ ZH = Texts(
     failed="失败",
     submitted="已提交",
     found=lambda n: f"{n} 条",
+    found_by_source=lambda kb, memory: (
+        f"{kb + memory} 条："
+        + "，".join(
+            part
+            for part, count in ((f"知识库 {kb} 条", kb), (f"记忆 {memory} 条", memory))
+            if count
+        )
+    ),
     none_found="没有找到",
     partial_tail="（部分结果）",
+    tail_separator="",
+    already_proposed_tail="已提议过，未重复提交",
     new_title="新会话",
     failed_message="这次回答没有完成，请重试。",
     upload_types="只支持 PDF、Word、Markdown、TXT、HTML 文件",
@@ -130,6 +159,15 @@ ZH = Texts(
     ),
 )
 
+
+def _results(n: int) -> str:
+    return f"{n} result" if n == 1 else f"{n} results"
+
+
+def _and(names: Sequence[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 EN = Texts(
     system="""You are {brand}'s knowledge assistant. When answering an employee's question:
 - Search with search_knowledge first, and answer only from the search results.
@@ -143,6 +181,8 @@ EN = Texts(
 - When the search fails, tell the user the knowledge base is unavailable for now.
 - When the user clearly states or confirms knowledge the team should keep, propose it with
   propose_knowledge. Do not propose your own guesses, or what the search results already hold.
+  Propose at most one piece of knowledge per answer.
+- Never tell the user a proposal is verified or saved unless the tool result says so.
 - Answer in the language of the user's question, briefly and clearly.""",
     search_description=(
         "Search the company knowledge base and this user's memories; returns numbered passages."
@@ -157,15 +197,26 @@ EN = Texts(
     propose_reason="Why it is worth keeping",
     not_found="No relevant content found.",
     partial="(Some sources are unavailable for now)",
+    unavailable=lambda names: f"({_and(names)} unavailable)",
+    source_label={"memory": "memory", "kb": "knowledge base", "rerank": "reranking"},
     kind_label={"memory": "Memory", "entry": "Knowledge entry", "document": "Document"},
     proposed={
         "awaiting_user": (
-            "Submitted, waiting for your confirmation.",
+            "Submitted as a proposal, waiting for the user's confirmation. It is not in the "
+            "knowledge base yet and it is not verified.",
             "Awaiting your confirmation",
         ),
-        "awaiting_review": ("Submitted, waiting for review.", "Awaiting review"),
-        "entry": ("Saved to the knowledge base.", "Saved"),
+        "awaiting_review": (
+            "Submitted as a proposal, waiting for a reviewer. It is not in the knowledge base "
+            "yet and it is not verified.",
+            "Awaiting review",
+        ),
+        "entry": (
+            "Saved to the knowledge base without review: it is not reviewed or verified.",
+            "Saved (not reviewed)",
+        ),
     },
+    already_proposed="A proposal was already made for this answer. Do not propose again.",
     tool_titles={
         "search_knowledge": "Searching the knowledge base",
         "propose_knowledge": "Proposing to the knowledge base",
@@ -177,9 +228,22 @@ EN = Texts(
     step_done="Done",
     failed="Failed",
     submitted="Submitted",
-    found=lambda n: f"{n} result" if n == 1 else f"{n} results",
+    found=_results,
+    found_by_source=lambda kb, memory: (
+        f"{_results(kb + memory)}: "
+        + ", ".join(
+            part
+            for part, count in (
+                (f"{kb} from the knowledge base", kb),
+                (f"{memory} from memory", memory),
+            )
+            if count
+        )
+    ),
     none_found="nothing found",
     partial_tail=" (partial)",
+    tail_separator=" ",
+    already_proposed_tail="already proposed, not sent again",
     new_title="New conversation",
     failed_message="This answer did not finish. Please try again.",
     upload_types="Only PDF, Word, Markdown, TXT and HTML files are supported",
@@ -229,11 +293,46 @@ EN = Texts(
 
 TEXTS: dict[Locale, Texts] = {"zh": ZH, "en": EN}
 
+# The order sources are named in, whatever order steward reports them in.
+SOURCES = ("memory", "kb", "rerank")
+
+# What a proposal's tool result said before 2026-11-27 (it read as if the proposal were final).
+LEGACY_PROPOSED: dict[Locale, dict[str, str]] = {  # stage -> what the tool said
+    "zh": {
+        "awaiting_user": "已提交，等待你确认。",
+        "awaiting_review": "已提交，等待审核。",
+        "entry": "已存入知识库。",
+    },
+    "en": {
+        "awaiting_user": "Submitted, waiting for your confirmation.",
+        "awaiting_review": "Submitted, waiting for review.",
+        "entry": "Saved to the knowledge base.",
+    },
+}
+
+
+def missing_line(degraded: Sequence[str], texts: Texts) -> str:
+    """A search result's first line for the sources steward could not reach: named when steward
+    names only sources we know, else the general wording."""
+    if not set(degraded) <= set(SOURCES):
+        return texts.partial
+    return texts.unavailable([texts.source_label[s] for s in SOURCES if s in degraded])
+
+
+def _subsets(items: Sequence[str]) -> list[tuple[str, ...]]:
+    return [c for size in range(1, len(items) + 1) for c in combinations(items, size)]
+
+
 # What a tool result may say, in any locale: event logs outlive a locale switch.
 ANY_PARTIAL = tuple(t.partial for t in TEXTS.values())
+ANY_MISSING = {
+    missing_line(subset, t): subset for t in TEXTS.values() for subset in _subsets(SOURCES)
+}  # a search result's first line -> the sources that were down
 ANY_PROPOSED = {
-    t.proposed[stage][0]: stage for t in TEXTS.values() for stage in t.proposed
-}  # model text -> stage
+    text: stage for said in LEGACY_PROPOSED.values() for stage, text in said.items()
+} | {t.proposed[stage][0]: stage for t in TEXTS.values() for stage in t.proposed}
+# model text -> stage
+ANY_ALREADY_PROPOSED = tuple(t.already_proposed for t in TEXTS.values())
 
 
 def texts_for(request: Request) -> Texts:

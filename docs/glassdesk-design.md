@@ -120,7 +120,7 @@ department approval is needed [2]".
 | --- | --- |
 | Chat (聊天) | Session list; message stream; citations in an answer can be opened to see the source passage; confirmation cards (steward's `suggestions[]`); the execution panel on the right updates in real time |
 | Execution (执行过程) | The full timeline of one answer (opened from the chat; it has a fixed URL that **only logged-in users of this deployment can see**; v1 has no public share link — owner decision, 2026-11-25): per step, its type, input summary, output summary, duration, tokens, cost (when the endpoint does not report cost, show "未知" (unknown), never 0); failed steps are marked red |
-| Knowledge base (知识库) | Upload documents; create entries by hand; entry list (status active / verified / deprecated, source, hit count); candidates awaiting confirmation and review; a reviewer can approve / reject |
+| Knowledge base (知识库) | Upload documents; create entries by hand; entry list (status active / verified / deprecated, source, hit count); candidates awaiting confirmation and review; a reviewer can approve / reject; a reviewer or admin can deprecate (停用) an entry still in use, confirmed in the app's own dialog with an optional reason |
 | Insights (洞察) | "KB 缺什么" ("what the KB lacks": frequent questions with low retrieval scores), positive / negative ratings of answers, daily usage and cost |
 
 ## 5. Agent and tools
@@ -130,7 +130,7 @@ One agent (`desk`), with a role such as `desk.answer` (the concrete model is in 
 | Tool | Backed by | Notes |
 | --- | --- | --- |
 | `search_knowledge(query)` | steward `retrieve` (joint memory + KB retrieval, with the current user's scope) | Returns passages, sources, scores; the citations of an answer can only come from these results |
-| `propose_knowledge(title, content, reason)` | steward `suggest` | Generates a candidate that follows steward's risk policy (automatic / ask the user / review); the agent cannot write an entry that takes effect directly |
+| `propose_knowledge(title, content, reason)` | steward `suggest` | Generates a candidate that follows steward's risk policy (automatic / ask the user / review); the agent cannot write an entry that takes effect directly. At most one per answer: a second call in the same run is refused as a tool error without calling steward. Its result says plainly that the proposal is not in the KB yet and not verified (or, when it went live, that it is not reviewed); the prompt forbids telling the user otherwise |
 | `get_entry(entry_id)` | steward `entry_get` | Reads the full text of one entry (used when a citation is expanded) |
 
 What the user said about themselves earlier in the same conversation (history, preferences, situation) may be
@@ -165,7 +165,10 @@ will be added later as customers need them.
   high-risk entry could bypass review.
 - **Reviewer identity**: there is only one review key, so in steward's change_log all reviews are recorded as the same
   actor. glassdesk keeps its own audit table (who, when, on which candidate / entry, what was done) and writes the
-  glassdesk user name into the `reason` / `note` field of the steward decision. Having steward accept a proxied
+  glassdesk user name into the `reason` / `note` field of the steward decision. Deprecating an entry
+  (`POST /api/kb/entries/{id}/deprecate`, reviewer / admin) also goes through the review key, after checking
+  the entry is in the deployment's collection; steward's deprecate takes no note, so the optional reason is
+  kept only in the audit row (`entry_id`, action `deprecate`). Having steward accept a proxied
   reviewer identity is a later cross-repo change, not in v1.
 - **Answer feedback**: the UI gives a positive / negative rating to a whole answer. glassdesk stores answer-level
   feedback (the insights page's positive rate uses it); it also records the same rating against every item the answer
@@ -183,6 +186,16 @@ will be added later as customers need them.
   lite-agent HTTP shell).
 - Citations: the citation numbers in an answer map to passages in the `search_knowledge` results; a citation that does
   not match shows no link and is marked on the timeline.
+- A search step says where its results came from: "8 条：知识库 5 条，记忆 3 条" / "8 results: 5 from the knowledge
+  base, 3 from memory" (entries and documents count as the knowledge base). The counts come from the passages
+  glassdesk stored for that call (`run_passages`, keyed by run and call id), not from the tool's text. When steward
+  reports a source as down (`RetrieveOut.degraded`: `memory`, `kb`, `rerank`), the tool result and the step name it
+  ("（记忆暂时不可用）" / "(memory unavailable)"); a source steward names that glassdesk does not know keeps the general
+  "partial" wording.
+- Answers are rendered as Markdown (`react-markdown`, raw HTML never rendered, images dropped, links shown as text
+  with their URL in parentheses, so nothing in model text can be clicked or loaded to carry data out); a single
+  newline stays a line break (`whitespace-pre-line`); `[n]` markers become citation chips wherever they sit (bold,
+  list items, link text), never inside code.
 
 ## 7. Authentication and users (v1)
 
@@ -392,3 +405,44 @@ prompt became English like the rest of the CLI (operator text, not UI).
   instead. Not done: `texts` stays an optional `ZH` default (making it required means rewriting existing tests' calls;
   every production caller passes it); timeline steps still carry backend-written text rather than structured facts
   (an API change beyond this one); the `--fake` demo model and fixed passages stay Chinese (e2e scaffolding, run in zh).
+
+### Browser test fixes (2026-11-27, branch `fix/browser-test-findings`)
+
+A browser walk-through of the running app found six problems; each fix has a test that was seen failing first.
+- **Markdown shown raw** (`**800 CNY per night**` literally): `AnswerText` renders with `react-markdown` (no
+  `rehype-raw`); a small rehype pass turns matched `[n]` in text nodes into citation chips (also inside bold and list
+  items, skipping code); unmatched markers stay text. The chip component is module-level so an open popover survives a
+  re-render.
+- **Memory invisible on the timeline**: the search step counts knowledge-base and memory results from the stored
+  passages (§6).
+- **"(partial)" unexplained**: the tool result's first line and the step name what was missing (§6). Old logs with
+  the general wording still read as "partial".
+- **Duplicate proposals** (two near-identical cards from one answer): a second `propose_knowledge` in one run raises
+  `AlreadyProposed`, which lite-agent records as the tool's error result; steward is not called. A first call counts
+  unless steward certainly did nothing (connection refused or never made, or a 4xx: `StewardUnavailable.unsent`);
+  after a 5xx, a timeout or a cancellation steward may have made the candidate, so a retry is refused too. The timeline shows the refusal as "已提议过，未重复提交" / "already proposed",
+  not as a failure.
+- **"Proposed with the verified content"**: the proposal results now say the proposal is not in the KB and not
+  verified, or for one that went live that it is not reviewed or verified; one prompt line forbids calling a
+  proposal verified or saved unless the tool result says so. The previous wordings stay recognised for old logs; the
+  `--fake` demo model keeps telling the user the short outcome.
+- **No way to deprecate an entry**: route, `StewardPort.deprecate`, Knowledge page button and dialog (§4, §5);
+  `review_audit` gains `entry_id` (migration 0007). There was no dialog component yet: `components/ConfirmDialog.tsx`
+  is the app's own.
+
+Deliberately not done:
+- (a) A cited answer can still misstate its source (seen: three years' service answered as 10 days of leave, while
+  the entry says 5 days after one year and 10 after five). Deferred to a measured eval round, not a prompt tweak.
+- (b) steward-side issues (a conflict should go to review, draft language, duplicate suggestions) are fixed in
+  llm-steward 4816b66 (its PR #27, stacked on #26), and both pins (`backend/pyproject.toml`, `deploy/compose.yaml`)
+  follow in this branch. New knowledge near an effective entry, and a member's edit of effective knowledge, now wait
+  for a reviewer. The compose `STEWARD_LLM` gains `"roles": {"kb.similar": {"model": "bge-m3:567m"}}`: steward refuses
+  to start with `STEWARD_KB_LLM` on and no embedding model for `kb.similar`.
+- (c) Every search returning all 5 demo entries raises every entry's hit count. This is by design: steward counts the
+  items it returned, while glassdesk records feedback only for the cited ones.
+- (e) If the `review_audit` insert fails after steward has deprecated an entry, the entry is out of use with no audit
+  row: the same order as approve / reject (steward first, then the audit), accepted.
+- (d) The timeline still recognises tool wording: the legacy proposal wording, and every combination of missing
+  sources. The general fix is to store per-call facts (degraded sources, proposal stage or refusal) in a table next to
+  `run_passages`, read them in the timeline, and keep today's parsing frozen as the fallback for old logs. It is
+  deferred because it needs a migration and a decision on backfilling old logs.
