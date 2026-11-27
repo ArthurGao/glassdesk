@@ -99,7 +99,13 @@ class Decision:
 
 
 class StewardUnavailable(Exception):
-    """steward could not answer. The message never carries steward's own text."""
+    """steward could not answer. The message never carries steward's own text. `unsent`: steward
+    certainly did nothing (the connection was never made, or it refused with a 4xx); otherwise
+    a write may have happened even though no answer came back."""
+
+    def __init__(self, message: str, *, unsent: bool = False) -> None:
+        super().__init__(message)
+        self.unsent = unsent
 
 
 class StewardRejected(Exception):
@@ -115,6 +121,7 @@ class StewardPort(Protocol):
     async def ensure_collection(self) -> str: ...
     async def list_entries(self) -> list[Entry]: ...
     async def create_entry(self, title: str, content: str, *, author: str) -> Written: ...
+    async def deprecate(self, entry_id: str) -> Entry: ...
     async def list_documents(self) -> list[Document]: ...
     async def upload_document(
         self, filename: str, data: bytes, mime: str, *, title: str | None
@@ -187,6 +194,10 @@ def _document(d: m.DocumentOut) -> Document:
     )
 
 
+# Transport errors raised before a request reached steward (the SDK wraps them, keeping the cause).
+_NEVER_SENT = (httpx.ConnectError, httpx.ConnectTimeout)
+
+
 async def _call[T](what: str, call: Awaitable[T]) -> T:
     """One steward call: a refusal (4xx) keeps steward's short detail for the page; anything
     else (unreachable, 5xx, a credential problem) is only "unavailable", without steward's text."""
@@ -197,7 +208,8 @@ async def _call[T](what: str, call: Awaitable[T]) -> T:
             detail = exc.detail if len(exc.detail) <= _DETAIL_CHARS else exc.code
             raise StewardRejected(exc.status, detail) from None
         log.warning("steward %s failed: %s %s", what, exc.status, exc.code)
-        raise StewardUnavailable(type(exc).__name__) from None
+        unsent = 400 <= exc.status < 500 or isinstance(exc.__cause__, _NEVER_SENT)
+        raise StewardUnavailable(type(exc).__name__, unsent=unsent) from None
     except OSError as exc:
         log.warning("steward %s failed: %s", what, type(exc).__name__)
         raise StewardUnavailable(type(exc).__name__) from None
@@ -313,6 +325,18 @@ class HttpSteward:
             ),
         )
         return _written(out)
+
+    async def deprecate(self, entry_id: str) -> Entry:
+        """Takes one of this deployment's entries out of use. steward allows it to a reviewer, so
+        it goes through the review key, after the entry was checked to be in our collection
+        (the key reaches the whole namespace). steward's deprecate takes no reason: glassdesk's
+        audit row keeps it."""
+        col = await self.ensure_collection()
+        found = await _call("entry", self._client.kb.entries.get(entry_id))
+        if str(found.collection_id) != col:
+            raise StewardRejected(404, "no such entry")
+        out = await _call("deprecate", self._review_client.kb.entries.deprecate(entry_id))
+        return _entry(out)
 
     async def list_documents(self) -> list[Document]:
         col = await self.ensure_collection()

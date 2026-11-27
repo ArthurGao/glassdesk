@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from glassdesk.app import create_app
 from glassdesk.config import Settings
 from glassdesk.db import Deps
+from glassdesk.steward import Passage
 from glassdesk.testing import FakeSteward
 from tests.helpers import P1, BlockingModel, ask, client_for, parse_sse, search_then_answer
 
@@ -266,3 +267,26 @@ async def test_a_stream_resumed_after_two_runs_sends_both_answers(
         ).text
     )
     assert [m[2]["run_id"] for m in resumed if m[0] == "answer"] == [first, second]
+
+
+async def test_search_steps_count_results_from_the_kb_and_from_memory(
+    make_app: Callable[..., FastAPI], engine: AsyncEngine
+) -> None:
+    memory = Passage(
+        item_id="m1",
+        kind="memory",
+        title=None,
+        source="memory",
+        text="用户在上海办公",
+        score=0.4,
+        verified=False,
+    )
+    steward = FakeSteward([P1, memory], degraded=("rerank",))
+    client = await client_for(make_app(search_then_answer("a[1]"), steward), engine, "alice")
+    conv_id, _ = await ask(client)
+    streamed = parse_sse((await client.get(f"/api/conversations/{conv_id}/stream")).text)
+    tool_steps = [m[2] for m in streamed if m[0] == "step" and m[2]["kind"] == "tool"]
+    expected = "“报销上限” → 2 条：知识库 1 条，记忆 1 条（重排序暂时不可用）"
+    assert tool_steps[-1]["detail"] == expected
+    steps = (await client.get(f"/api/conversations/{conv_id}/steps")).json()
+    assert [s["detail"] for s in steps if s["kind"] == "tool"] == [expected]

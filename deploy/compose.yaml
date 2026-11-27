@@ -55,7 +55,7 @@ services:
     restart: unless-stopped
 
   steward:
-    build: https://github.com/ArthurGao/llm-steward.git#7e5ce050ba6d63f3f10afdced0c5d098cdfd6181:backend
+    build: https://github.com/ArthurGao/llm-steward.git#4816b66d02510893cf656abb95950bf7d1a0c162:backend
     depends_on:
       db: {condition: service_healthy}
       lite-rag: {condition: service_started}
@@ -76,8 +76,11 @@ services:
       # the KB pipeline's model steps (risk, worthiness, drafting): without them steward makes
       # no confirmation cards and refuses suggestions (422)
       STEWARD_KB_LLM: "true"
-      # thinking off: qwen3 thinks in English and then drafted Chinese knowledge in English
-      STEWARD_LLM: '{"backend": "ollama", "model": "${CHAT_MODEL:-qwen3:8b}", "reasoning_effort": "none", "backends": {"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}}'
+      # thinking off: qwen3 thinks in English and then drafted Chinese knowledge in English.
+      # kb.similar: the embedding model new knowledge is compared with effective entries by
+      # (steward design §5: touching an entry sends it to review); steward refuses to start
+      # without it while STEWARD_KB_LLM is on
+      STEWARD_LLM: '{"backend": "ollama", "model": "${CHAT_MODEL:-qwen3:8b}", "reasoning_effort": "none", "backends": {"ollama": {"type": "ollama", "base_url": "${OLLAMA_URL:-http://ollama:11434}/v1"}}, "roles": {"kb.similar": {"model": "bge-m3:567m"}}}'
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - steward-state:/data

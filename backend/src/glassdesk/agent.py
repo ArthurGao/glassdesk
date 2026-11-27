@@ -8,8 +8,8 @@ from lite_agent import Agent, Budget, SessionStore, ToolContext, tool
 from lite_model import AsyncToolModel
 from pydantic import BaseModel, Field, create_model
 
-from glassdesk.i18n import TEXTS, ZH, Texts
-from glassdesk.steward import Passage, StewardPort
+from glassdesk.i18n import TEXTS, ZH, Texts, missing_line
+from glassdesk.steward import Passage, StewardPort, StewardRejected, StewardUnavailable
 
 ROLE = "desk.answer"
 # (call id, steward's retrieval id, [(citation number, passage), …]): what the page resolves
@@ -55,10 +55,14 @@ def _arg_models(texts: Texts) -> tuple[type[SearchArgs], type[ProposeArgs]]:
 _ARGS = {texts: _arg_models(texts) for texts in TEXTS.values()}
 
 
+class AlreadyProposed(Exception):
+    """A second propose_knowledge call in one run: refused as the tool's error result."""
+
+
 def format_passages(
     passages: Sequence[Passage], degraded: Sequence[str], *, start: int = 1, texts: Texts = ZH
 ) -> str:
-    lines = [texts.partial] if degraded else []
+    lines = [missing_line(degraded, texts)] if degraded else []
     if not passages:
         return "\n".join([*lines, texts.not_found])
     for n, p in enumerate(passages, start=start):
@@ -79,8 +83,10 @@ def build_agent(
 ) -> Agent:
     """Built per run: the tool closes over the asking user, so steward scopes memory to them.
     Citation numbers run on from `first_n` across every search, so `[n]` names one passage in
-    the whole conversation, never "the n-th result of some search"."""
+    the whole conversation, never "the n-th result of some search". One run answers one
+    question, so it proposes at most once (a model repeating itself made two cards)."""
     next_n = first_n
+    proposed = False
     search_args, propose_args = _ARGS[texts]
 
     @tool(description=texts.search_description)
@@ -94,9 +100,23 @@ def build_agent(
 
     @tool(description=texts.propose_description)
     async def propose_knowledge(args: ProposeArgs, ctx: ToolContext) -> str:
-        written = await steward.suggest(
-            f"{args.title}\n{args.content}", user_id=user_id, session_id=ctx.session_id
-        )
+        nonlocal proposed
+        if proposed:
+            raise AlreadyProposed(texts.already_proposed)
+        # Set before the call and kept on any failure after which steward may have made the
+        # candidate (a 5xx, a timeout, a cancellation): only a proposal steward certainly never
+        # received or refused may be tried again.
+        proposed = True
+        try:
+            written = await steward.suggest(
+                f"{args.title}\n{args.content}", user_id=user_id, session_id=ctx.session_id
+            )
+        except StewardRejected:
+            proposed = False
+            raise
+        except StewardUnavailable as exc:
+            proposed = not exc.unsent
+            raise
         if written.entry is not None:
             return texts.proposed["entry"][0]
         stage = written.candidate.stage if written.candidate else "awaiting_review"

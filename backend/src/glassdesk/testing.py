@@ -55,7 +55,7 @@ class FakeSteward:
 
     def _check(self) -> None:
         if self.fail:
-            raise StewardUnavailable("ConnectError")
+            raise StewardUnavailable("ConnectError", unsent=True)  # connection refused
 
     async def search(self, query: str, *, user_id: str, session_id: str) -> SearchResult:
         self.calls.append((query, user_id, session_id))
@@ -112,6 +112,16 @@ class FakeSteward:
         return Written(
             entry=self._entry(title, content, status="active", origin="manual"), candidate=None
         )
+
+    async def deprecate(self, entry_id: str) -> Entry:
+        self._check()
+        i = next((i for i, e in enumerate(self.entries) if e.id == entry_id), None)
+        if i is None:
+            raise StewardRejected(404, "no such entry")
+        if self.entries[i].status == "deprecated":
+            raise StewardRejected(409, "already deprecated")
+        self.entries[i] = replace(self.entries[i], status="deprecated", updated_at=_now())
+        return self.entries[i]
 
     async def list_documents(self) -> list[Document]:
         self._check()

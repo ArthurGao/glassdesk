@@ -122,3 +122,80 @@ test('上传 is held while the document is being sent', async () => {
   expect(await screen.findByRole('status')).toHaveTextContent('已上传')
   expect(posts).toBe(1)
 })
+
+const OLD: EntryOut = { ...ENTRY, id: 'e2', title: '旧制度', status: 'deprecated' }
+
+function entriesApi(role: 'member' | 'reviewer') {
+  const entries = [ENTRY, OLD]
+  const posted: unknown[] = []
+  api(role)
+  server.use(
+    http.get('*/api/kb/entries', () => HttpResponse.json(entries)),
+    http.post('*/api/kb/entries/e1/deprecate', async ({ request }) => {
+      posted.push(await request.json())
+      entries[0] = { ...ENTRY, status: 'deprecated' }
+      return HttpResponse.json(entries[0])
+    }),
+  )
+  return posted
+}
+
+test('a member gets no 停用 button', async () => {
+  entriesApi('member')
+  renderApp('/knowledge')
+  await screen.findByText('报销时限')
+  expect(screen.queryByRole('button', { name: '停用' })).toBeNull()
+})
+
+test('a reviewer deprecates an entry after confirming in the dialog', async () => {
+  const posted = entriesApi('reviewer')
+  renderApp('/knowledge')
+  const user = userEvent.setup()
+  const row = (await screen.findByText('报销时限')).closest('tr')!
+  // only rows still in use can be deprecated
+  expect(within(screen.getByText('旧制度').closest('tr')!).queryByRole('button')).toBeNull()
+  await user.click(within(row).getByRole('button', { name: '停用' }))
+  let dialog = screen.getByRole('dialog', { name: '停用这个条目？' })
+  expect(dialog).toHaveTextContent('报销时限')
+  await user.click(within(dialog).getByRole('button', { name: '取消' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(posted).toEqual([])
+
+  await user.click(within(row).getByRole('button', { name: '停用' }))
+  dialog = screen.getByRole('dialog', { name: '停用这个条目？' })
+  await user.type(within(dialog).getByLabelText('原因（可选）'), '已被新制度取代')
+  await user.click(within(dialog).getByRole('button', { name: '停用' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  expect(posted).toEqual([{ reason: '已被新制度取代' }])
+  // refetched: the row now reads 已停用 and offers nothing more
+  const updated = (await screen.findByText('报销时限')).closest('tr')!
+  await waitFor(() => expect(updated).toHaveTextContent('已停用'))
+  expect(within(updated).queryByRole('button')).toBeNull()
+})
+
+test('Escape closes the deprecate dialog without deprecating', async () => {
+  const posted = entriesApi('reviewer')
+  renderApp('/knowledge')
+  const user = userEvent.setup()
+  const row = (await screen.findByText('报销时限')).closest('tr')!
+  await user.click(within(row).getByRole('button', { name: '停用' }))
+  await user.keyboard('{Escape}')
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(posted).toEqual([])
+})
+
+test('a failed deprecation keeps the dialog open and says so', async () => {
+  entriesApi('reviewer')
+  server.use(
+    http.post('*/api/kb/entries/e1/deprecate', () =>
+      HttpResponse.json({ detail: '知识库暂时不可用' }, { status: 503 }),
+    ),
+  )
+  renderApp('/knowledge')
+  const user = userEvent.setup()
+  const row = (await screen.findByText('报销时限')).closest('tr')!
+  await user.click(within(row).getByRole('button', { name: '停用' }))
+  const dialog = screen.getByRole('dialog', { name: '停用这个条目？' })
+  await user.click(within(dialog).getByRole('button', { name: '停用' }))
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('操作失败，请稍后再试')
+})

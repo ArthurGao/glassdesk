@@ -257,6 +257,16 @@ export type DecisionOut = {
 };
 
 /**
+ * DeprecateIn
+ */
+export type DeprecateIn = {
+    /**
+     * Reason
+     */
+    reason?: string | null;
+};
+
+/**
  * DocumentOut
  */
 export type DocumentOut = {
@@ -1005,6 +1015,36 @@ export type CreateEntryResponses = {
 };
 
 export type CreateEntryResponse = CreateEntryResponses[keyof CreateEntryResponses];
+
+export type DeprecateEntryData = {
+    body: DeprecateIn;
+    path: {
+        /**
+         * Entry Id
+         */
+        entry_id: string;
+    };
+    query?: never;
+    url: '/api/kb/entries/{entry_id}/deprecate';
+};
+
+export type DeprecateEntryErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type DeprecateEntryError = DeprecateEntryErrors[keyof DeprecateEntryErrors];
+
+export type DeprecateEntryResponses = {
+    /**
+     * Successful Response
+     */
+    200: EntryOut;
+};
+
+export type DeprecateEntryResponse = DeprecateEntryResponses[keyof DeprecateEntryResponses];
 
 export type ListDocumentsData = {
     body?: never;

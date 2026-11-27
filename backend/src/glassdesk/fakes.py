@@ -7,7 +7,7 @@ from lite_model import AssistantTurn, Message, Text, ToolCall, ToolResults
 from lite_model.testing import AsyncFakeModel, FakeTurnCall
 
 from glassdesk.agent import ROLE
-from glassdesk.i18n import ANY_PROPOSED, ZH
+from glassdesk.i18n import ANY_PROPOSED, LEGACY_PROPOSED, ZH
 from glassdesk.steward import Passage
 
 DEMO_PASSAGES = (
@@ -34,6 +34,9 @@ _FIRST = re.compile(r"^\[(\d+)\] (.+?) — ", re.MULTILINE)
 
 
 REMEMBER = "记住"
+# What the demo answer tells the user a proposal became (the tool result itself is for the model):
+# glassdesk's earlier zh wording, which reads well to a person.
+_TOLD = LEGACY_PROPOSED["zh"]
 
 
 def _reply(call: FakeTurnCall) -> AssistantTurn:
@@ -41,7 +44,7 @@ def _reply(call: FakeTurnCall) -> AssistantTurn:
     passage found."""
     last = call.messages[-1]
     if isinstance(last, ToolResults) and last.results[0].content in ANY_PROPOSED:
-        return AssistantTurn((Text(f"好的，{last.results[0].content}"),))
+        return AssistantTurn((Text(f"好的，{_TOLD[ANY_PROPOSED[last.results[0].content]]}"),))
     if isinstance(last, ToolResults):
         found = _FIRST.search(last.results[0].content)
         if found is None:

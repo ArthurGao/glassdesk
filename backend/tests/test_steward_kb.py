@@ -231,3 +231,81 @@ async def test_fake_puts_low_risk_entries_live_and_sends_high_risk_to_review() -
     assert live.entry is not None and live.entry.status == "active"
     assert review.candidate is not None and review.candidate.stage == "awaiting_review"
     assert [e.title for e in await fake.list_entries()] == ["报销时限"]
+
+
+@respx.mock
+async def test_deprecate_checks_the_entry_is_ours_then_uses_the_review_key(
+    steward: HttpSteward,
+) -> None:
+    respx.get(f"{BASE}/v1/kb/collections").mock(
+        return_value=httpx.Response(200, json=collections("company"))
+    )
+    eid = str(uuid.uuid4())
+    got = respx.get(f"{BASE}/v1/kb/entries/{eid}").mock(
+        return_value=httpx.Response(200, json=entry_json(id=eid))
+    )
+    route = respx.post(f"{BASE}/v1/kb/entries/{eid}/deprecate").mock(
+        return_value=httpx.Response(200, json=entry_json(id=eid, status="deprecated"))
+    )
+    entry = await steward.deprecate(eid)
+    assert (entry.id, entry.status) == (eid, "deprecated")
+    # deprecating is a reviewer's act in steward; reading the entry is not
+    assert got.calls[0].request.headers["authorization"] == "Bearer stw_k"
+    assert route.calls[0].request.headers["authorization"] == "Bearer stw_r"
+
+
+@respx.mock
+async def test_deprecate_refuses_an_entry_of_another_collection(steward: HttpSteward) -> None:
+    respx.get(f"{BASE}/v1/kb/collections").mock(
+        return_value=httpx.Response(200, json=collections("company"))
+    )
+    eid = str(uuid.uuid4())
+    respx.get(f"{BASE}/v1/kb/entries/{eid}").mock(
+        return_value=httpx.Response(200, json=entry_json(id=eid, collection_id=str(uuid.uuid4())))
+    )
+    route = respx.post(f"{BASE}/v1/kb/entries/{eid}/deprecate")
+    with pytest.raises(StewardRejected) as caught:
+        await steward.deprecate(eid)
+    assert caught.value.status == 404
+    assert route.call_count == 0
+
+
+async def test_fake_deprecates_an_entry_once_and_lists_it_as_deprecated() -> None:
+    fake = FakeSteward()
+    written = await fake.create_entry("报销时限", "30 天内提交", author="alice")
+    assert written.entry is not None
+    deprecated = await fake.deprecate(written.entry.id)
+    assert deprecated.status == "deprecated"
+    assert [(e.title, e.status) for e in await fake.list_entries()] == [("报销时限", "deprecated")]
+    with pytest.raises(StewardRejected) as twice:
+        await fake.deprecate(written.entry.id)
+    with pytest.raises(StewardRejected) as unknown:
+        await fake.deprecate("no-such-entry")
+    assert (twice.value.status, unknown.value.status) == (409, 404)
+
+
+@pytest.mark.parametrize(
+    ("response", "unsent"),
+    [
+        (httpx.ConnectError("refused"), True),  # never reached steward
+        (httpx.ConnectTimeout("slow"), True),
+        (httpx.ReadTimeout("slow"), False),  # sent: steward may have acted
+        (httpx.Response(503, json={}), False),
+        (httpx.Response(403, json={}), True),  # refused before doing anything
+    ],
+)
+@respx.mock
+async def test_unavailable_says_whether_steward_certainly_did_nothing(
+    steward: HttpSteward, response: object, unsent: bool
+) -> None:
+    respx.get(f"{BASE}/v1/kb/collections").mock(
+        return_value=httpx.Response(200, json=collections("company"))
+    )
+    route = respx.post(f"{BASE}/v1/suggestions")
+    if isinstance(response, httpx.Response):
+        route.mock(return_value=response)
+    else:
+        route.mock(side_effect=response)
+    with pytest.raises(StewardUnavailable) as caught:
+        await steward.suggest("t\nc", user_id="u1", session_id="s1")
+    assert caught.value.unsent is unsent

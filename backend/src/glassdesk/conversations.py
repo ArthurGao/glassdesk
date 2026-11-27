@@ -40,7 +40,7 @@ from glassdesk.i18n import texts_for
 from glassdesk.runs import Busy, Runs
 from glassdesk.steward import Passage
 from glassdesk.suggestions import open_cards
-from glassdesk.timeline import Answer, Step, changes, project_answer, steps_after
+from glassdesk.timeline import Answer, Kinds, Step, changes, project_answer, steps_after
 from glassdesk.users import metadata
 
 log = logging.getLogger(__name__)
@@ -160,6 +160,22 @@ async def _passages(
         )
     )
     return {r.n: (Passage(**r.passage), r.retrieval_id) for r in rows}
+
+
+async def _passage_kinds(engine: AsyncEngine, conversation_id: uuid.UUID) -> Kinds:
+    """Per search call, how many of its stored passages are of each kind: what the timeline
+    says about where results came from (memory or the knowledge base)."""
+    kind = run_passages.c.passage["kind"].astext
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            select(run_passages.c.run_id, run_passages.c.call_id, kind, func.count())
+            .where(run_passages.c.conversation_id == conversation_id)
+            .group_by(run_passages.c.run_id, run_passages.c.call_id, kind)
+        )
+    kinds: dict[tuple[str, str], dict[str, int]] = {}
+    for run_id, call_id, k, count in rows:
+        kinds.setdefault((run_id, call_id), {})[k] = count
+    return kinds
 
 
 async def _next_citation_number(engine: AsyncEngine, conversation_id: uuid.UUID) -> int:
@@ -363,7 +379,9 @@ async def get_steps(
     conv: Owned, request: Request, after: Annotated[int, Query(ge=0)] = 0
 ) -> list[Step]:
     deps = _deps(request)
-    return steps_after(await _events(deps, conv.agent_session_id), after, texts=texts_for(request))
+    events = await _events(deps, conv.agent_session_id)
+    kinds = await _passage_kinds(deps.engine, conv.id)
+    return steps_after(events, after, texts=texts_for(request), kinds=kinds)
 
 
 @router.get("/{conversation_id}/answers")
@@ -448,14 +466,18 @@ async def stream(
     deps, runs, texts = _deps(request), _runs(request), texts_for(request)
     cursor = int(last_event_id) if last_event_id and last_event_id.isdigit() else after
     events: list[Event] = []
+    kinds: Kinds = {}
     answered = False
     while True:
         # read before the events: a run that ends meanwhile is read once more
         going = runs.following(conv.id)
         read_after = events[-1].seq if events else 0
-        events.extend(await _events(deps, conv.agent_session_id, read_after))  # only what is new
+        new = await _events(deps, conv.agent_session_id, read_after)  # only what is new
+        events.extend(new)
+        if new:  # a search's passages are stored before its result event is written
+            kinds = await _passage_kinds(deps.engine, conv.id)
         start = cursor
-        for at, step in changes(events, cursor, texts=texts):
+        for at, step in changes(events, cursor, texts=texts, kinds=kinds):
             yield ServerSentEvent(data=step, event="step", id=str(at))
             cursor = at
         # every run that finished since the last read, in order (several after a reconnect)
