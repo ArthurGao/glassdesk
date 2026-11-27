@@ -1,80 +1,93 @@
-# glassdesk 设计文档：过程可见的企业知识助手
+# glassdesk design: a knowledge assistant whose process is visible
 
-2026-11-25 · 状态：草稿，待 owner 审批
+2026-11-25 · Status: draft, awaiting owner approval
 
-## 1. 意图
+## 1. Intent
 
-**glassdesk** 是给某个企业客户**演示或交付**的知识助手 app：客户的员工向 agent 提问，agent 从受治理的知识库（KB）
-和记忆里找答案，每句回答都带出处；对话中出现的新知识按治理规则进入 KB（自动 / 问用户 / 专家审核），也可以手工录入。
-它的卖点是**过程可见**（glass box）：每次回答，客户都能在页面上看到 agent 做了什么——调了哪些工具、查到哪些段落、
-花了多少钱和时间。
+**glassdesk** is a knowledge-assistant app that is **demonstrated or delivered** to one enterprise customer: the
+customer's employees ask the agent questions, the agent looks for answers in the governed knowledge base (KB) and in
+memory, and every sentence of the answer carries its source. New knowledge that comes up in a conversation enters the
+KB under the governance rules (automatically / by asking the user / by expert review), or can be entered by hand.
+Its selling point is a **visible process** (glass box): for every answer the customer can see on the page what the
+agent did — which tools it called, which passages it found, how much money and time it spent.
 
-它同时是 lite-ai 这套栈的**第一个面向终端用户的 app**：用真实的 app 把 lite-agent、llm-steward（及其背后的
-lite-rag / lite-mem）、lite-model 串起来，暴露各模块接口上的问题（已知缺口：token streaming、跨模块 tracing）。
+It is also the **first end-user app** of the lite-ai stack: it uses a real app to connect lite-agent, llm-steward
+(and the lite-rag / lite-mem behind it) and lite-model, and to expose problems in the modules' interfaces (known gaps:
+token streaming, cross-module tracing).
 
-### 目标
+### Goals
 
-- 一个客户一套部署（docker compose），能在客户面前现场演示，也能交付给客户自己运行。
-- 聊天：答案带引用；agent 的每一步实时推到页面（步骤级流式）。
-- 执行过程页面：任意一次回答都能展开看完整的时间线（工具调用、检索结果、模型调用、token / 成本 / 耗时）。
-- 知识进入 KB 的三条路：AI 自动判断（低风险自动生效）、问用户（确认卡片）、手工录入（条目或上传文档）。
-- 知识库页面：文档、条目及其状态、待确认 / 待审核的 candidate、"KB 缺什么"。
-- 可换品牌（客户名、logo、主色），可换模型端点（客户自己的 Ollama / OpenAI 兼容 / LiteLLM）。
+- One deployment per customer (docker compose), which can be demonstrated live in front of the customer and also
+  delivered for the customer to run themselves.
+- Chat: answers carry citations; every step of the agent is pushed to the page in real time (step-level streaming).
+- Execution page: for any answer, the full timeline can be expanded (tool calls, retrieval results, model calls,
+  tokens / cost / duration).
+- Three ways for knowledge to enter the KB: AI decides automatically (low-risk items take effect automatically), ask
+  the user (confirmation card), manual entry (an entry or an uploaded document).
+- The 知识库 (Knowledge base) page: documents, entries and their status, candidates awaiting confirmation / review,
+  and "KB 缺什么" ("what the KB lacks").
+- Rebrandable (customer name, logo, main colour), with a replaceable model endpoint (the customer's own Ollama /
+  OpenAI-compatible / LiteLLM).
 
-### 非目标（v1 不做）
+### Non-goals (not in v1)
 
-- 多租户 SaaS、公开注册、计费。一套部署只服务一个客户。
-- 自己实现 RAG、记忆、治理：全部交给 llm-steward（它再交给 lite-rag / lite-mem / WeKnora）。
-- token 级流式输出：lite-model 目前不做 streaming（`lite-model/docs/lite-model-design.md:46`），v1 只做步骤级流式；
-  token 流式是后续阶段，要先改 lite-model（见 §10）。
-- 跨模块统一 tracing（OpenTelemetry 等）：v1 的时间线来自 lite-agent 自己的 event log。
-- 通用 agent 平台、可视化编排、插件市场。
+- Multi-tenant SaaS, public sign-up, billing. One deployment serves one customer only.
+- Implementing RAG, memory or governance itself: all of it goes to llm-steward (which hands it on to lite-rag /
+  lite-mem / WeKnora).
+- Token-level streaming: lite-model does not do streaming at present (`lite-model/docs/lite-model-design.md:46`), so
+  v1 only does step-level streaming; token streaming is a later stage and needs a lite-model change first (see §10).
+- Cross-module unified tracing (OpenTelemetry etc.): in v1 the timeline comes from lite-agent's own event log.
+- A general agent platform, visual orchestration, a plugin marketplace.
 
-### 反目标（做出来也算失败的情况）
+### Anti-goals (cases that count as failure even if built)
 
-- agent 能**直接写**生效的 KB 条目。agent 只能提议（生成 candidate），与 steward 规则 5（MCP 只能提议）一致。
-- 回答编造出处：引用必须对应真实检索到的段落。
-- 执行过程页面泄露密钥、API key、内部 URL 或原始 system prompt。
-- 演示时依赖 owner 的 llm-gateway 订阅：客户部署必须用客户自己能用的模型端点。
+- The agent can **write** KB entries that take effect directly. The agent can only propose (generate a candidate),
+  consistent with steward rule 5 (MCP can only propose).
+- Answers that invent sources: a citation must correspond to a passage that was actually retrieved.
+- The execution page leaking secrets, API keys, internal URLs or the raw system prompt.
+- Depending on the owner's llm-gateway subscription for a demo: a customer deployment must use a model endpoint the
+  customer can use.
 
-## 2. 方案（已选 ①）
+## 2. Approach (① chosen)
 
-| 方案 | 做法 | 取舍 |
+| Approach | How | Trade-off |
 | --- | --- | --- |
-| **① 自己的 FastAPI backend，以库的方式用 lite-agent（选定）** | backend 内定义 agent 与工具，用 `lite_agent.Agent` + `PgSessionStore` 跑 run，自己提供 HTTP / SSE、鉴权和页面需要的接口；KB 与记忆通过 llm-steward 的 Python SDK（HTTP）访问 | 客户相关的定制（鉴权、品牌、工具、页面数据形状）全在 glassdesk；steward 和 lite-agent 保持通用 |
-| ② 直接用 `liteagent serve`，glassdesk backend 只做一层转发 | 代码最少 | lite-agent 的 HTTP 壳只绑 loopback、没有鉴权（lite-agent design §10），接口和数据形状被通用壳定死，客户定制要回头改库 |
-| ③ 塞进 llm-steward 当一个新页面 | 部署最少 | 违反 steward 的非目标（"不做聊天应用或 agent 框架"），客户定制会污染通用服务 |
+| **① Its own FastAPI backend, using lite-agent as a library (chosen)** | The backend defines the agent and tools, runs with `lite_agent.Agent` + `PgSessionStore`, and provides the HTTP / SSE, authentication and page-specific endpoints itself; KB and memory are reached through llm-steward's Python SDK (HTTP) | Customer-specific customisation (authentication, branding, tools, page data shapes) all lives in glassdesk; steward and lite-agent stay general |
+| ② Use `liteagent serve` directly, glassdesk backend only forwards | Least code | lite-agent's HTTP shell binds loopback only and has no authentication (lite-agent design §10); endpoints and data shapes are fixed by the general shell, and customer customisation would mean changing the library |
+| ③ Put it into llm-steward as a new page | Least to deploy | Violates steward's non-goals ("no chat app or agent framework"); customer customisation would pollute the general service |
 
-owner 于 2026-11-25 选定 ①。
+The owner chose ① on 2026-11-25.
 
-## 3. 总体架构
+## 3. Overall architecture
 
 ```
-浏览器（frontend：React SPA）
-   │ REST + SSE（同源，经 backend）
+Browser (frontend: React SPA)
+   │ REST + SSE (same origin, via the backend)
    ▼
-glassdesk backend（FastAPI，:8740）
-   ├─ 鉴权、会话、品牌配置
-   ├─ agent 运行：lite_agent.Agent（role 走 lite-model）+ PgSessionStore（数据库 glassdesk）
-   │     工具：search_knowledge / propose_knowledge / …（§5）
-   ├─ 时间线：读 lite-agent event log → 投影成页面用的步骤（§6）
-   └─ llm-steward SDK（HTTP，namespace = 本客户）
+glassdesk backend (FastAPI, :8740)
+   ├─ authentication, sessions, branding config
+   ├─ agent run: lite_agent.Agent (roles go through lite-model) + PgSessionStore (database glassdesk)
+   │     tools: search_knowledge / propose_knowledge / … (§5)
+   ├─ timeline: read the lite-agent event log → project into the steps the page uses (§6)
+   └─ llm-steward SDK (HTTP, namespace = this customer)
             │
             ▼
-   llm-steward（:8600）── KB provider（lite-rag / WeKnora / native）、memory provider（lite-mem）
+   llm-steward (:8600) ── KB provider (lite-rag / WeKnora / native), memory provider (lite-mem)
             │
-   lite-model ──HTTP──► 客户的模型端点（Ollama / OpenAI 兼容 / LiteLLM Proxy）
+   lite-model ──HTTP──► the customer's model endpoint (Ollama / OpenAI-compatible / LiteLLM Proxy)
 ```
 
-规则：
+Rules:
 
-1. **glassdesk 不 import llm-steward**（workspace 规则），只用 `llm-steward-client` 的 HTTP 模式（不用 `embedded`）。
-2. **每次 LLM 调用都走 lite-model role**（workspace 约定），role 名在配置里，不写死模型 id。
-3. **KB 的写入只经过 steward**：glassdesk 自己不存知识；它只存 agent 的会话事件（lite-agent）和 app 自己的数据
-   （用户、会话列表、品牌配置）。
-4. **测试不调真实 LLM、不调真实 steward**：用 lite-model 的 `AsyncFakeModel` 和 steward 的假实现（§9）。
+1. **glassdesk does not import llm-steward** (workspace rule); it only uses the HTTP mode of `llm-steward-client`
+   (not `embedded`).
+2. **Every LLM call goes through a lite-model role** (workspace convention); role names are in the configuration, no
+   model id is hard-coded.
+3. **KB writes only go through steward**: glassdesk stores no knowledge itself; it only stores the agent's session
+   events (lite-agent) and the app's own data (users, session list, branding config).
+4. **Tests call no real LLM and no real steward**: they use lite-model's `AsyncFakeModel` and a fake steward (§9).
 
-## 4. 页面
+## 4. Pages
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -95,188 +108,257 @@ glassdesk backend（FastAPI，:8740）
 └──────────────┴───────────────────────────────────┴───────────────────┘
 ```
 
-| 页面 | 内容 |
+The mockup's text is the Chinese UI and sample data, kept as is. Glosses: 客户 logo (customer logo); 聊天 | 知识库 | 洞察
+(Chat | Knowledge base | Insights); 用户 (user); 会话列表 (session list); 报销政策 / 入职流程 (reimbursement policy /
+onboarding process); 新会话 (new session); 执行过程 (execution process); 理解问题 (understand the question); 生成回答
+(generate the answer); 总耗时 (total time); 要不要存进知识库？ (save to the knowledge base?); 存为团队知识 / 只给我 / 不要
+(save as team knowledge / only for me / no); 输入框… (input box…); 发送 (send). The sample question is "报销上限是多少？"
+(What is the reimbursement limit?), the sample answer "travel lodging limit is 800 yuan per night [1], above which
+department approval is needed [2]".
+
+| Page | Content |
 | --- | --- |
-| 聊天 | 会话列表；消息流；回答里的引用可点开看原文段落；确认卡片（steward 的 `suggestions[]`）；右侧执行过程面板实时更新 |
-| 执行过程 | 单次回答的完整时间线（可从聊天点开；有固定 URL，**只有本部署的登录用户能看**，v1 不做公开分享链接——owner 2026-11-25 决定）：每一步的类型、输入摘要、输出摘要、耗时、token、成本（端点不报成本时显示"未知"，不显示 0）；失败步骤标红 |
-| 知识库 | 上传文档；手工新建条目；条目列表（状态 active / verified / deprecated、出处、命中次数）；待确认和待审核的 candidate；reviewer 可批准 / 拒绝 |
-| 洞察 | "KB 缺什么"（检索分低的高频问题）、回答的好评 / 差评、每日用量与成本 |
+| Chat (聊天) | Session list; message stream; citations in an answer can be opened to see the source passage; confirmation cards (steward's `suggestions[]`); the execution panel on the right updates in real time |
+| Execution (执行过程) | The full timeline of one answer (opened from the chat; it has a fixed URL that **only logged-in users of this deployment can see**; v1 has no public share link — owner decision, 2026-11-25): per step, its type, input summary, output summary, duration, tokens, cost (when the endpoint does not report cost, show "未知" (unknown), never 0); failed steps are marked red |
+| Knowledge base (知识库) | Upload documents; create entries by hand; entry list (status active / verified / deprecated, source, hit count); candidates awaiting confirmation and review; a reviewer can approve / reject |
+| Insights (洞察) | "KB 缺什么" ("what the KB lacks": frequent questions with low retrieval scores), positive / negative ratings of answers, daily usage and cost |
 
-## 5. Agent 与工具
+## 5. Agent and tools
 
-一个 agent（`desk`），role 例如 `desk.answer`（具体模型在 lite-model 配置里）。工具：
+One agent (`desk`), with a role such as `desk.answer` (the concrete model is in the lite-model configuration). Tools:
 
-| 工具 | 背后 | 说明 |
+| Tool | Backed by | Notes |
 | --- | --- | --- |
-| `search_knowledge(query)` | steward `retrieve`（memory + KB 联合检索，带当前用户 scope） | 返回段落、来源、分数；回答的引用只能来自这里的结果 |
-| `propose_knowledge(title, content, reason)` | steward `suggest` | 生成 candidate，按 steward 的风险策略走（自动 / 问用户 / 审核）；agent 不能直接写生效条目 |
-| `get_entry(entry_id)` | steward `entry_get` | 读一条条目全文（引用展开用） |
+| `search_knowledge(query)` | steward `retrieve` (joint memory + KB retrieval, with the current user's scope) | Returns passages, sources, scores; the citations of an answer can only come from these results |
+| `propose_knowledge(title, content, reason)` | steward `suggest` | Generates a candidate that follows steward's risk policy (automatic / ask the user / review); the agent cannot write an entry that takes effect directly |
+| `get_entry(entry_id)` | steward `entry_get` | Reads the full text of one entry (used when a citation is expanded) |
 
-每轮对话结束后，backend 把这一轮的消息交给 steward `episode_add`（`mode=sync`，steward 负责抽取记忆、打 KB
-价值分、生成 candidate），把返回的 `suggestions[]` 推给前端显示卡片。用户在卡片上的决定调用
-`candidate_accept` / `candidate_reject`。（`mode=sync` 会让回答后多等一次 LLM 调用；卡片在回答之后异步出现，
-不阻塞回答显示——实现者的决定。）
+When each conversation turn ends, the backend hands that turn's messages to steward `episode_add` (`mode=sync`;
+steward extracts memory, scores the KB value and generates candidates) and pushes the returned `suggestions[]` to the
+frontend to show cards. The user's decision on a card calls `candidate_accept` / `candidate_reject`. (`mode=sync`
+costs one more LLM call of waiting after the answer; the card appears asynchronously after the answer and does not
+block the answer from showing — implementer's decision.)
 
-手工录入：知识库页面调用 `entry_create` / `document_upload`。
+Manual entry: the 知识库 (Knowledge base) page calls `entry_create` / `document_upload`.
 
-**Collection**（实现者的决定，owner 可改）：一个客户默认一个 collection `company`，由 `glassdesk setup`
-（以及 `seed --demo`）创建，风险路由用 steward 默认策略（low 自动、medium 问用户、high 审核），再加一条演示用的
-high 关键词规则，使三条写入路径在同一套配置下都能触发（G2 的 e2e 依赖这一点）。多 collection（按部门）以后按客户
-需要再加。
+**Collection** (implementer's decision, the owner can change it): one customer has one collection `company` by
+default, created by `glassdesk setup` (and by `seed --demo`); risk routing uses steward's default policy (low =
+automatic, medium = ask the user, high = review), plus one high-risk keyword rule for demos, so that all three write
+paths can be triggered under the same configuration (G2's e2e depends on this). Multiple collections (per department)
+will be added later as customers need them.
 
-### 后台数据与审计（实现者的决定）
+### Admin data and audit (implementer's decision)
 
-- **洞察数据**：steward 的 KB 缺口、命中统计、用量只在 `/admin/v1`（`/admin/v1/ns/{slug}/stats`、
-  `retrieval-logs?gaps=true`）上。backend 代持 `STEWARD_ADMIN_TOKEN`（只在服务器 `.env`，从不下发到浏览器），
-  用一个很薄的 HTTP 客户端读这两个接口——owner 2026-11-25 决定，不改 steward。
-- **两把 steward key**（2026-11-26 首次真实部署后改）：steward 把带 `review` 权限的 key **自己写入的内容**当作已审核，
-  直接生效。所以人做的一切（手工录入、AI 提议、确认卡片、上传、打分、检索）都走 read/write 的 key
-  （`GLASSDESK_STEWARD_API_KEY`），按风险路由；只有审核队列和审核决定走带 `review` 的 key
-  （`GLASSDESK_STEWARD_REVIEW_KEY`）。原先一把 key 兼三种权限，成员录入的高风险内容会绕过审核。
-- **审核身份**：审核 key 只有一把，steward 的 change_log 里所有审核都记成同一个
-  actor。glassdesk 自己记一张审计表（谁、何时、对哪个 candidate / 条目、做了什么），并把 glassdesk 用户名写进
-  steward 决定的 `reason` / `note` 字段。让 steward 接收代理的 reviewer 身份是以后的跨 repo 改动，v1 不做。
-- **回答反馈**：UI 对整条回答打好评 / 差评。glassdesk 存一份回答级反馈（洞察页的好评率用它）；同时把同一个评分
-  记到这条回答**引用过的**每一项上（steward `feedback(retrieval_id, item_id, helpful)`），让 steward 的
-  反馈驱动复审能工作。没被引用的检索结果不记。
+- **Insights data**: steward's KB gaps, hit statistics and usage are only on `/admin/v1` (`/admin/v1/ns/{slug}/stats`,
+  `retrieval-logs?gaps=true`). The backend holds `STEWARD_ADMIN_TOKEN` on behalf of users (only in the server's
+  `.env`, never sent to the browser) and reads these two endpoints with a very thin HTTP client — owner decision,
+  2026-11-25, steward is not changed.
+- **Two steward keys** (changed after the first real deployment on 2026-11-26): steward treats content **written by
+  a key that has the `review` permission itself** as already reviewed and makes it take effect directly. So everything
+  a human does (manual entry, AI proposals, confirmation cards, uploads, rating, retrieval) goes through a read/write
+  key (`GLASSDESK_STEWARD_API_KEY`) and follows risk routing; only the review queue and review decisions go through the
+  key with `review` (`GLASSDESK_STEWARD_REVIEW_KEY`). Originally one key combined three permissions, so a member's
+  high-risk entry could bypass review.
+- **Reviewer identity**: there is only one review key, so in steward's change_log all reviews are recorded as the same
+  actor. glassdesk keeps its own audit table (who, when, on which candidate / entry, what was done) and writes the
+  glassdesk user name into the `reason` / `note` field of the steward decision. Having steward accept a proxied
+  reviewer identity is a later cross-repo change, not in v1.
+- **Answer feedback**: the UI gives a positive / negative rating to a whole answer. glassdesk stores answer-level
+  feedback (the insights page's positive rate uses it); it also records the same rating against every item the answer
+  **cited** (steward `feedback(retrieval_id, item_id, helpful)`), so that steward's feedback-driven re-review works.
+  Retrieval results that were not cited are not recorded.
 
-## 6. 执行过程（时间线）
+## 6. Execution process (timeline)
 
-- 数据源：lite-agent 的 event log（`PgSessionStore`，数据库 `glassdesk`）。每次 run 的事件里已有 run 开始 / 结束、
-  模型调用（含 usage）、工具调用与结果。
-- backend 把事件**投影**成页面用的步骤（`step: {kind, title, input_summary, output_summary, started_at,
-  duration_ms, usage, cost, status}`），只暴露摘要，不暴露 system prompt、密钥或内部 URL（反目标）。
-- 实时：`GET /api/sessions/{id}/stream` 用 SSE 推送新步骤（做法参照 lite-agent HTTP 壳的 `events/stream`）。
-- 引用：回答里的引用编号映射到 `search_knowledge` 结果里的段落；对不上的引用不显示链接，并在时间线上标记。
+- Data source: lite-agent's event log (`PgSessionStore`, database `glassdesk`). The events of each run already
+  contain run start / end, model calls (with usage), and tool calls and results.
+- The backend **projects** the events into the steps the page uses (`step: {kind, title, input_summary,
+  output_summary, started_at, duration_ms, usage, cost, status}`), exposing only summaries, never the system prompt,
+  secrets or internal URLs (anti-goals).
+- Real time: `GET /api/sessions/{id}/stream` pushes new steps over SSE (modelled on the `events/stream` of the
+  lite-agent HTTP shell).
+- Citations: the citation numbers in an answer map to passages in the `search_knowledge` results; a citation that does
+  not match shows no link and is marked on the timeline.
 
-## 7. 鉴权与用户（v1）
+## 7. Authentication and users (v1)
 
-- 部署内的本地账号：管理员在 CLI 里创建用户（`glassdesk user create`），角色 `member` / `reviewer` / `admin`。
-- `reviewer` 能在知识库页面批准 / 拒绝 candidate（对应 steward 的 `review` 权限 API key，由 backend 代持）。
-- glassdesk 用户 id 作为 steward 的 `user_id` scope，每个用户有自己的记忆。
-- 客户 SSO（OIDC）留到有客户要求时再做。
+- Local accounts inside the deployment: an administrator creates users in the CLI (`glassdesk user create`), with
+  roles `member` / `reviewer` / `admin`.
+- A `reviewer` can approve / reject candidates on the 知识库 (Knowledge base) page (this corresponds to steward's API
+  key with the `review` permission, held by the backend on their behalf).
+- The glassdesk user id is used as steward's `user_id` scope, so each user has their own memory.
+- Customer SSO (OIDC) is left until a customer asks for it.
 
-## 8. 技术栈与部署
+## 8. Tech stack and deployment
 
-- backend：Python 3.12、uv、FastAPI、Pydantic v2、SQLAlchemy async + Alembic（app 自己的表），`lite-agent[pg]`
-  （release wheel，当前 0.2.4，与 workspace 的 lite-model 0.8.0 一致），`llm-steward-client`（0.1.0 没有
-  release，用 `git+…/llm-steward@<commit>#subdirectory=sdk/python` 固定到 commit）。
-- frontend：pnpm、React + Vite + TypeScript、TanStack Router / Query、shadcn/ui + Tailwind、Playwright；
-  客户端从 backend 的 OpenAPI 生成；确认卡片复用或参照 `@llm-steward/widget` 的 `SuggestionCard`。
-- 数据库：共享 PG 上新建数据库 `glassdesk`（app 表 + lite-agent 的 session schema）。
-- 端口：backend `127.0.0.1:8740`，frontend dev `8741`，e2e `8742`（写进 workspace AGENTS.md 的端口表）。
-- 部署（owner 2026-11-25 决定：一体化 Ollama）：一个客户一个 docker compose，包含 glassdesk（backend 同时
-  托管前端静态文件）、llm-steward（KB provider **lite-rag**，memory provider **lite-mem**）、PG + pgvector、
-  **Ollama**（chat 模型 + embedding 模型 bge-m3）。不依赖客户的云账号，离线也能演示；代价是需要一台性能够的机器，
-  部署文档要写明最低配置（内存 / GPU / 磁盘）。具体 chat 模型由实现者按选模型流程定（`llm-model-eval` skill），
-  写进 lite-model 配置。换成客户的 OpenAI 兼容端点只是改 lite-model 配置，v1 不做验证。品牌配置放在一个 yaml 里（客户名、logo、主色、欢迎语、示例问题）。
-- **一个部署一个 backend 进程**：「这个会话是否有 run 在跑」记在进程内存里（`runs.py`），同一会话同时只允许一个 run；
-  多 worker 或多副本需要先把这个状态移到数据库或事件日志里（run 没有 `run_finished` 就是还在跑）。
-- 演示数据：`glassdesk seed --demo` 写入一套虚构公司的文档和条目（明确标注是演示数据），演示完可清除。
+- backend: Python 3.12, uv, FastAPI, Pydantic v2, SQLAlchemy async + Alembic (the app's own tables), `lite-agent[pg]`
+  (release wheel, currently 0.2.4, consistent with the workspace's lite-model 0.8.0), `llm-steward-client` (0.1.0 has
+  no release, so it is pinned to a commit with `git+…/llm-steward@<commit>#subdirectory=sdk/python`).
+- frontend: pnpm, React + Vite + TypeScript, TanStack Router / Query, shadcn/ui + Tailwind, Playwright; the client is
+  generated from the backend's OpenAPI; the confirmation card reuses or follows `SuggestionCard` of
+  `@llm-steward/widget`.
+- Database: a new database `glassdesk` on the shared PG (app tables + lite-agent's session schema).
+- Ports: backend `127.0.0.1:8740`, frontend dev `8741`, e2e `8742` (written into the port table of the workspace
+  AGENTS.md).
+- Deployment (owner decision 2026-11-25: all-in-one Ollama): one docker compose per customer, containing glassdesk (the
+  backend also hosts the frontend static files), llm-steward (KB provider **lite-rag**, memory provider **lite-mem**),
+  PG + pgvector, and **Ollama** (chat model + embedding model bge-m3). It does not depend on the customer's cloud
+  account and can be demonstrated offline; the cost is that a machine with enough performance is needed, so the
+  deployment guide must state the minimum configuration (memory / GPU / disk). The concrete chat model is decided by
+  the implementer through the model-selection process (the `llm-model-eval` skill) and written into the lite-model
+  configuration. Switching to the customer's OpenAI-compatible endpoint is only a lite-model configuration change; v1
+  does not verify it. Branding configuration lives in one yaml (customer name, logo, main colour, welcome text, sample
+  questions).
+- **One backend process per deployment**: "whether this session has a run in progress" is kept in process memory
+  (`runs.py`), and only one run is allowed in a session at a time; multiple workers or replicas first need this state
+  moved into the database or the event log (a run without `run_finished` is still running).
+- Demo data: `glassdesk seed --demo` writes the documents and entries of a fictional company (clearly marked as demo
+  data), which can be cleared after the demo.
 
-## 9. 测试
+## 9. Tests
 
-- 单元 / 集成：`AsyncFakeModel` 驱动 agent；steward 用 HTTP 层的假实现（`respx` 或进程内假服务），断言工具调用的
-  请求和投影出的时间线步骤。
-- e2e：Playwright 跑生产构建，后端用 fake model + 假 steward；关键流程：提问 → 时间线出现 → 回答带引用 →
-  确认卡片 → 知识库里出现 candidate。
-- 可选的真实运行（`-m live`）：本地 Ollama + 本地 steward，只在 owner 要求时跑。
+- Unit / integration: `AsyncFakeModel` drives the agent; steward uses an HTTP-level fake (`respx` or an in-process fake
+  service), and the tests assert the tool-call requests and the projected timeline steps.
+- e2e: Playwright runs against the production build, with the backend on a fake model + fake steward; key flow: ask a
+  question → the timeline appears → the answer carries citations → confirmation card → a candidate appears in the
+  knowledge base.
+- Optional real runs (`-m live`): local Ollama + local steward, only run when the owner asks.
 
-## 10. 阶段
+## 10. Stages
 
-| 阶段 | 内容 | 验收 |
+| Stage | Content | Acceptance |
 | --- | --- | --- |
-| G0 骨架 | 仓库、backend / frontend 骨架、检查命令（ruff、mypy、pytest、typecheck、lint、build）、CI | 所有检查在空项目上通过 |
-| G1 竖切：一问一答 | 登录 → 聊天 → agent 调 `search_knowledge` → 带引用的回答；时间线经 SSE 实时显示 | e2e：提问后时间线出现搜索步骤，回答引用可点开 |
-| G2 知识进入 KB | episode 上报、确认卡片、`propose_knowledge`、知识库页面（上传、手工条目、candidate、审核） | e2e：三条写入路径各一条 |
-| G3 洞察与反馈 | 回答反馈（steward `feedback`）、KB 缺口、用量成本 | 页面数据与 steward 返回一致 |
-| G4 交付 | compose、品牌配置、演示数据、部署文档，从零部署验证 | 一台干净机器按文档部署成功 |
-| 后续 | 跨 repo 的改进（G1 审查记下）：lite-agent 导出 run 登记与事件流轮询，供 glassdesk 复用；`ToolResultEvent` 带结构化数据，引用不再单独存 `run_passages` 表、也不再从文本里数条数；lite-agent 加每个 run 的轮数上限（现在预算按整个会话累计，glassdesk 设为 200 轮） | 另行规划 |
-| 后续 | token 流式（先改 lite-model）、跨模块 tracing、SSO | 另行规划 |
+| G0 Skeleton | Repository, backend / frontend skeletons, check commands (ruff, mypy, pytest, typecheck, lint, build), CI | All checks pass on the empty project |
+| G1 Vertical slice: one question, one answer | Login → chat → the agent calls `search_knowledge` → an answer with citations; the timeline shows live over SSE | e2e: after a question the timeline shows a search step, and the answer's citations can be opened |
+| G2 Knowledge enters the KB | Episode reporting, confirmation cards, `propose_knowledge`, the 知识库 (Knowledge base) page (upload, manual entries, candidates, review) | e2e: one case per each of the three write paths |
+| G3 Insights and feedback | Answer feedback (steward `feedback`), KB gaps, usage and cost | The page data matches what steward returns |
+| G4 Delivery | compose, branding config, demo data, deployment guide, verified by deploying from scratch | Deployment on a clean machine following the guide succeeds |
+| Later | Cross-repo improvements (noted in the G1 review): lite-agent exports run registration and event-stream polling for glassdesk to reuse; `ToolResultEvent` carries structured data, so citations no longer need a separate `run_passages` table and are no longer counted from text; lite-agent gets a per-run turn limit (today the budget accumulates over the whole session, and glassdesk sets it to 200 turns) | Planned separately |
+| Later | Token streaming (lite-model first), cross-module tracing, SSO | Planned separately |
 
-## 11. 留给实现者决定的
+## 11. Left to the implementer
 
-- 目录结构、模块划分、具体表结构。
-- 引用格式（回答里的编号与 `search_knowledge` 结果的对应方式）。
-- 时间线步骤的分组和文案、投影的细节。
-- 假 steward 的形式（respx 还是进程内服务）。
-- 前端组件库细节、`SuggestionCard` 是复用还是参照重写（取决于 widget 能否在 steward 仓库外安装）。
+- Directory structure, module split, concrete table schemas.
+- The citation format (how the numbers in an answer correspond to the `search_knowledge` results).
+- Grouping and wording of timeline steps, projection details.
+- The form of the fake steward (respx or an in-process service).
+- Frontend component-library details, whether `SuggestionCard` is reused or rewritten by following it (depends on
+  whether the widget can be installed outside the steward repository).
 
-## 12. 阶段记录
+## 12. Stage records
 
-### G0 + G1（2026-11-25，分支 `feat/g0-g1`）
+### G0 + G1 (2026-11-25, branch `feat/g0-g1`)
 
-- 完成：仓库与检查命令；本地账号登录（签名 cookie，带 `session_version`，退出后旧 cookie 失效）；`desk` agent 与
-  `search_knowledge`；事件日志投影为步骤与带引用的回答；会话、提问（同一会话同时只有一个 run，409）、SSE 步骤流
-  （游标续传，结尾 `answer` + `end`）；聊天页（会话列表、问答、引用弹窗、执行过程面板）；`glassdesk serve --fake`
-  演示模式；e2e（登录 → 提问 → 时间线 → 引用）。
-- 与计划的偏差（详见计划执行记录）：lite-model 配置放在 `GLASSDESK_LLM__*`（同 llm-steward），不是单独文件；
-  预算 200 轮（lite-agent 预算按会话累计）；e2e 由 backend 直接托管构建好的前端（8743），8742 暂未使用；
-  e2e 暂不进 CI（需要 PG）。
-- 收尾中修掉的问题：引用段落按 `call_id` 跨 run 分组，端点每轮重复用同一 call id 时会串引用（改为按 run 分组）；
-  SSE 每 250ms 读整段日志（改为只读新事件）；引用编号改为**整个会话连续编号**（原来每次搜索都从 [1] 开始，
-  搜两次时 [1] 会指错来源）；首次 run 未写入就中断的会话不再永久失效；run 无法完成时流里发 `failed`；
-  搜索结果不完整时时间线标"部分结果"；失败的回答显示提示而不是空白；流被浏览器放弃（如 401）时发送按钮恢复。
-- 延后（G2 前后再处理）：
-  - 运行中断在工具调用中间（`tool_started` 无结果）时，下一次提问会报 `UnresolvedCalls`，需要用 lite-agent 的
-    `resume` 把这些调用标为结果未知；现在这次提问会以 `failed` 显示。
-  - 发送按钮在 POST 返回前没有防重复点击，双击会看到一次误导的"上一个问题还在处理中"。
-  - 登录 cookie 的 `Secure` 取决于请求协议；放在终止 TLS 的反向代理后面时要给 uvicorn 加 `--proxy-headers`
-    （G4 部署文档写明，或做成设置）。
-  - 会话预算是整个会话 200 次模型调用（约 100 个问题），超出后回答以失败显示；需要 lite-agent 提供每个 run 的上限。
-  - `keep()` 写数据库失败时会把一次成功的搜索标成失败。
+- Done: repository and check commands; local-account login (signed cookie carrying `session_version`, so the old
+  cookie is invalid after logout); the `desk` agent and `search_knowledge`; the event log projected into steps and
+  answers with citations; sessions, asking questions (one run at a time per session, 409), the SSE step stream (cursor
+  resume, ending with `answer` + `end`); the chat page (session list, Q&A, citation dialog, execution panel);
+  `glassdesk serve --fake` demo mode; e2e (login → ask → timeline → citation).
+- Deviations from the plan (details in the plan's execution record): the lite-model configuration is in
+  `GLASSDESK_LLM__*` (same as llm-steward), not a separate file; the budget is 200 turns (lite-agent's budget
+  accumulates per session); the e2e has the backend host the built frontend directly (8743), and 8742 is not used for
+  now; e2e is not in CI yet (it needs PG).
+- Problems fixed during close-out: cited passages were grouped by `call_id` across runs, so when the endpoint reused
+  the same call id every turn, citations got mixed up (now grouped by run); SSE read the whole log every 250 ms (now it
+  reads only new events); citation numbers now run **continuously through the whole session** (before, every search
+  started from [1], so after two searches [1] could point to the wrong source); a session whose first run was
+  interrupted before anything was written is no longer permanently broken; when a run cannot finish, the stream sends
+  `failed`; when search results are incomplete, the timeline marks "部分结果" (partial results); a failed answer shows a
+  notice instead of a blank; when the browser abandons the stream (e.g. a 401), the send button is restored.
+- Deferred (to be handled around G2):
+  - When a run is interrupted in the middle of a tool call (`tool_started` with no result), the next question reports
+    `UnresolvedCalls`; lite-agent's `resume` is needed to mark those calls as result-unknown; for now that question
+    shows as `failed`.
+  - The send button has no double-click protection before the POST returns, so a double click shows a misleading
+    "上一个问题还在处理中" (the previous question is still being processed) once.
+  - The `Secure` flag of the login cookie depends on the request protocol; behind a TLS-terminating reverse proxy,
+    uvicorn needs `--proxy-headers` (state it in the G4 deployment guide, or make it a setting).
+  - The session budget is 200 model calls for the whole session (about 100 questions), and after that answers show as
+    failed; lite-agent needs to provide a per-run limit.
+  - When `keep()` fails to write to the database, it marks a successful search as failed.
 
-### G2（2026-11-25，分支 `feat/g2`）
+### G2 (2026-11-25, branch `feat/g2`)
 
-- 完成：三条写入路径都经过 steward——回答之后上报 episode（steward 抽取、打分，medium 风险出确认卡片）、
-  agent 的 `propose_knowledge`、知识库页面手工录入条目与上传文档；卡片在聊天里确认（存为团队知识 / 只给我 / 不要）；
-  知识库页面（条目、文档、待审核），审核员批准或拒绝并写 `review_audit`；演示模式里"记住…"会触发提议；
-  e2e 覆盖提议 → 确认 → 生效，以及高风险条目 → 审核 → 已验证。
-- 授权：steward 信任持 key 的服务器传来的任何 `user_id`，所以"这张卡片是不是你的"由 glassdesk 在决定前检查
-  （只认该用户的待确认卡片）；审核只认 steward 的待审核队列（审核 key 能决定任何 candidate）。
-- 回答不等 steward 抽取：run 一结束就放开会话、发出回答；上报 episode 在会话占用之外进行，流跟到它结束再发卡片和 `end`。
-- 与计划的偏差：steward 的建议接口没有 `reason` 字段，`propose_knowledge` 的理由只给模型看；steward 没有按 id
-  取 candidate 的接口，归属检查用列表的第一页（一个用户待确认的卡片超过一页时，旧卡片会 404）。
-- 延后：真实 steward 上的高风险关键词规则是命名空间配置（`steward ns apply`），API key 改不了，G4 的部署文档写明；
-  演示模式里的关键词规则只在假 steward 里。
+- Done: all three write paths go through steward — reporting an episode after the answer (steward extracts and scores;
+  medium risk produces a confirmation card), the agent's `propose_knowledge`, and manual entry and document upload on
+  the 知识库 (Knowledge base) page; the card is confirmed in the chat (存为团队知识 / 只给我 / 不要: save as team
+  knowledge / only for me / no); the 知识库 page (entries, documents, "待审核" (pending review)), where reviewers
+  approve or reject and write `review_audit`; in demo mode "记住…" ("remember…") triggers a proposal; e2e covers
+  proposal → confirmation → taking effect, and high-risk entry → review → "已验证" (verified).
+- Authorization: steward trusts any `user_id` sent by a server that holds a key, so "is this card yours" is checked by
+  glassdesk before the decision (only that user's cards awaiting confirmation are accepted); review only recognises
+  steward's review queue (the review key can decide any candidate).
+- The answer does not wait for steward's extraction: as soon as the run ends the session is released and the answer is
+  sent; reporting the episode happens outside the session lock, and the stream follows it to the end before sending the
+  card and `end`.
+- Deviations from the plan: steward's suggestion endpoint has no `reason` field, so the reason of `propose_knowledge`
+  is only shown to the model; steward has no endpoint to fetch a candidate by id, so the ownership check uses the first
+  page of the list (when a user has more than one page of cards awaiting confirmation, an old card returns 404).
+- Deferred: the high-risk keyword rule on a real steward is namespace configuration (`steward ns apply`) that an API
+  key cannot change, so the G4 deployment guide states it; the keyword rule in demo mode exists only in the fake
+  steward.
 
-### G3（2026-11-25，分支 `feat/g3`）
+### G3 (2026-11-25, branch `feat/g3`)
 
-- 完成：回答下的 有帮助 / 没帮助（每人每个回答一条，最新的算数；同一个评价重复点不会再发给 steward）；评价按回答引用过的
-  每一项转给 steward 的 feedback；每次 run 记一行用量（抛异常的 run 也记为失败）；洞察页（审核员 / 管理员）：
-  部署时区内最近 7 天的回答、失败、tokens、成本（未知成本不算 0，单独计数；全未知显示"未知"）、好评率（未评价的不进分母；
-  没有评价显示"—"）、steward 的知识库统计和"知识库缺什么"（Admin API，未配置或连不上时显示"未配置"）；演示模式标"演示数据"。
-- 只把每个用户对每个回答的**第一次**评价转给 steward：steward 每收到一次就加一次计数，也不能替换已有的评价，
-  改主意或来回切换会把同一个人算多次（推送前的安全审查发现可以借此刷"待复审"）。改主意只记在 glassdesk 里；
-  steward 那边保留第一次的评价。要准确需要 steward 按 (retrieval, item, user) 存一条（跨 repo，以后再说）。
-- 收尾中修掉：上一个回答刚出现、run 还没放开会话时提问会被 409（提问最多等 3 秒）。
+- Done: 有帮助 / 没帮助 (helpful / not helpful) under an answer (one per person per answer, the latest counts; repeating
+  the same rating is not sent to steward again); the rating is forwarded to steward's feedback for every item the
+  answer cited; every run records one usage row (a run that raised an exception is also recorded, as failed); the
+  insights page (reviewers / admins): answers, failures, tokens, cost over the last 7 days in the deployment time zone
+  (unknown cost is not counted as 0 but counted separately; if all are unknown it shows "未知" (unknown)), positive rate
+  (unrated answers are not in the denominator; with no ratings it shows "—"), steward's KB statistics and "知识库缺什么"
+  ("what the KB lacks") (Admin API; shows "未配置" (not configured) when not configured or unreachable); demo mode is
+  marked "演示数据" (demo data).
+- Only each user's **first** rating of each answer is forwarded to steward: steward adds one count every time it
+  receives one and cannot replace an existing rating, so changing one's mind or toggling back and forth would count the
+  same person several times (the security review before the push found this could be used to inflate "pending
+  re-review"). A change of mind is recorded only in glassdesk; steward keeps the first rating. To be exact, steward
+  needs to store one per (retrieval, item, user) (cross-repo, later).
+- Fixed during close-out: asking a question right after the previous answer appeared, while the run had not yet
+  released the session, got a 409 (a question now waits up to 3 seconds).
 
-### G4（2026-11-25，分支 `feat/g4`）
+### G4 (2026-11-25, branch `feat/g4`)
 
-- 完成：品牌配置（`GLASSDESK_BRAND_NAME / _COLOR / _WELCOME / _EXAMPLES`，公开接口 `/api/branding`，外壳、登录页、
-  空聊天页的欢迎语和示例问题；颜色只接受 `#RRGGBB`）；`glassdesk seed --demo`（"示例科技"6 条知识，标题带"[演示]"，
-  可重复运行）；`serve --proxy-headers`；镜像（前端构建一次，由 backend 托管；迁移文件放进包里，安装后的包也带着）；
-  `deploy/`：compose（PostgreSQL 三个库、steward 与 lite-rag 按固定 commit 从 GitHub 构建、Ollama 在 `ollama` profile，
-  也可用宿主机的 Ollama）、`init-db.sh`、`steward-ns.yaml`（高风险关键词）、`bootstrap.sh`（一次性初始化：密钥、
-  lite-rag key、steward 命名空间与 key、管理员账号）、中文部署文档。
-- 与设计的偏差：steward 镜像不含 lite-rag，所以 lite-rag 是单独的服务（steward 经 HTTP 连它）；steward 必须打开
-  `STEWARD_KB_LLM`，否则不出确认卡片、拒绝建议（422）；演示数据没有"清除"命令（本端口没有停用条目的接口），文档写了做法。
-- 验证：glassdesk 镜像已构建并检查（迁移文件、前端静态文件在镜像里）；compose 配置能解析。**整套从零部署（bootstrap.sh）
-  还没跑**：它会启动整套长期运行的服务，需要 owner 确认（见交付说明）。
+- Done: branding configuration (`GLASSDESK_BRAND_NAME / _COLOR / _WELCOME / _EXAMPLES`, public endpoint
+  `/api/branding`, with the welcome text and sample questions in the shell, the login page and the empty chat page;
+  the colour accepts only `#RRGGBB`); `glassdesk seed --demo` ("示例科技" (Example Tech), 6 knowledge items, titles
+  carrying "[演示]" (demo), safe to run repeatedly); `serve --proxy-headers`; the image (the frontend is built once and
+  hosted by the backend; migration files are put inside the package, so an installed package carries them too);
+  `deploy/`: compose (three PostgreSQL databases, steward and lite-rag built from GitHub at pinned commits, Ollama in
+  the `ollama` profile, with the host's Ollama also usable), `init-db.sh`, `steward-ns.yaml` (high-risk keywords),
+  `bootstrap.sh` (one-time initialisation: secrets, lite-rag key, steward namespace and keys, admin account), and the
+  deployment guide (in Chinese).
+- Deviations from the design: the steward image does not contain lite-rag, so lite-rag is a separate service (steward
+  reaches it over HTTP); steward must have `STEWARD_KB_LLM` turned on, otherwise it produces no confirmation cards and
+  rejects suggestions (422); the demo data has no "clear" command (this port has no endpoint to deactivate entries),
+  and the guide describes how to do it.
+- Verification: the glassdesk image has been built and checked (migration files and frontend static files are in the
+  image); the compose configuration resolves. **The whole from-scratch deployment (bootstrap.sh) has not been run
+  yet**: it would start the whole set of long-running services and needs the owner's confirmation (see the delivery
+  notes).
 
-### 首次真实部署（2026-11-26，分支 `fix/deploy-first-run`）
+### First real deployment (2026-11-26, branch `fix/deploy-first-run`)
 
-在本机用宿主机 Ollama（qwen3:8b、bge-m3）从零跑 `bootstrap.sh`，再用浏览器走完全部流程，发现并修好：
-- lite-rag（S15）和 lite-mem（S14）的模型配置改成 lite-model 的 backends 写法，旧变量让两者启动即退出。
-- llm-steward 镜像没装 `agent` extra，但启动时一定 import `lite_agent`：在 llm-steward 修，本仓库的 steward 固定 commit 跟进。
-- 写入条目走 60 s 的客户端（steward 先判风险、做嵌入），10 s 的客户端在模型冷启动时让演示数据写入失败；
-  原来"模型调用给更长超时"的测试什么也没验证（respx 不执行超时），改成检查请求带的超时。
-- **审核被绕过**：一把带 `review` 的 key 让成员录入的高风险条目直接"已验证"。改成两把 key（§5）。
-- steward 起草的卡片是英文：qwen3 开着思考时用英文思考，起草时丢了原文语言（9 次里 1 次保留中文）。
-  steward 的起草提示词加了"不要翻译"（9/9 保留中文），部署里 steward 和 lite-mem 关掉 qwen3 的思考。
-- 前端：引用弹窗按 Esc / 点外面关闭；保存条目时按钮显示"保存中…"并禁用（steward 判风险要几十秒，原来会重复提交）；
-  标签页标题用客户名；Enter 发送、Shift+Enter 换行（输入法确认的 Enter 不算）；发送问题、上传文档在请求中也禁用按钮。
-- 收尾：simplify（候选的 key 只在 `HttpSteward._candidates_for` 选；审核 key 另外只用来建 collection——steward 规定建 collection 要 review 权限，从零部署时发现）；Codex 无发现。没做的：共享连接池（审核少，
-  省得不多）、全站改用 `useMutation`（超出本次范围）。根因在 steward（"带 review 的 key 自己写入即视为已审核"）：
-  以后可以在 steward 加显式的"跳过审核"开关，到时 glassdesk 可以回到一把 key。
-
+Ran `bootstrap.sh` from scratch on this machine with the host Ollama (qwen3:8b, bge-m3), then walked through the whole
+flow in a browser, and found and fixed:
+- The model configuration of lite-rag (S15) and lite-mem (S14) was changed to lite-model's backends form; the old
+  variables made both exit at startup.
+- The llm-steward image did not have the `agent` extra installed, but at startup it always imports `lite_agent`: fixed
+  in llm-steward, and this repository's pinned steward commit follows.
+- Writing entries goes through a 60 s client (steward judges risk first and does embedding); a 10 s client made the
+  demo-data writes fail when the model was cold-starting; the earlier test "give model calls a longer timeout"
+  verified nothing (respx does not execute timeouts), and was changed to check the timeout carried by the request.
+- **Review was bypassed**: one key with `review` made a member's high-risk entry directly "已验证" (verified). Changed
+  to two keys (§5).
+- The cards steward drafted were in English: with thinking on, qwen3 thinks in English and loses the original language
+  when drafting (1 in 9 times it kept Chinese). Steward's drafting prompt gained "do not translate" (9/9 kept Chinese),
+  and in the deployment steward and lite-mem turn qwen3's thinking off.
+- Frontend: the citation dialog closes on Esc / click outside; while saving an entry the button shows "保存中…"
+  (Saving…) and is disabled (steward takes tens of seconds to judge risk, and it used to be submitted twice); the tab
+  title uses the customer name; Enter sends, Shift+Enter breaks the line (an Enter that confirms IME input does not
+  count); the buttons for sending a question and uploading a document are also disabled while the request is running.
+- Close-out: simplify (the candidate's key is chosen only in `HttpSteward._candidates_for`; the review key is otherwise
+  used only to create the collection — steward requires the review permission to create a collection, found during the
+  from-scratch deployment); Codex had no findings. Not done: a shared connection pool (little review traffic, small
+  saving), switching the whole site to `useMutation` (beyond this change's scope). The root cause is in steward ("a key
+  with review is treated as reviewed for its own writes"): later an explicit "skip review" switch can be added in
+  steward, and glassdesk can then go back to one key.
