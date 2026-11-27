@@ -20,8 +20,9 @@ from glassdesk.steward import (
     Written,
 )
 
-# The fake's stand-in for a steward namespace rule that sends these words to review.
-HIGH_RISK_WORDS = ("价格", "政策", "法务", "医疗", "安全")
+# The fake's stand-in for a steward namespace rule that sends these words to review (steward
+# matches them case-insensitively, as here); deploy/steward-ns.yaml holds both locales' words.
+HIGH_RISK_WORDS = ("价格", "政策", "法务", "医疗", "安全", "price", "pricing", "policy", "legal")
 
 
 def _now() -> datetime:
@@ -29,7 +30,7 @@ def _now() -> datetime:
 
 
 def _high_risk(*texts: str) -> bool:
-    return any(word in text for text in texts for word in HIGH_RISK_WORDS)
+    return any(word in text.casefold() for text in texts for word in HIGH_RISK_WORDS)
 
 
 class FakeSteward:

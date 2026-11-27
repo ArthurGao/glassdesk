@@ -25,9 +25,10 @@ docs/      design and plans
    suggestion, and steward's policy decides whether it goes live (low risk may), waits for the user or for review.
 4. The timeline never exposes the system prompt, provenance URLs, keys or upstream error text.
 5. Tests never call a real LLM, a real steward, Ollama or llm-gateway (`AsyncFakeModel`, `FakeSteward`).
-6. Unknown cost is `null` in the API and "未知" in the UI, never 0.
-7. Code-facing text and docs (design doc, READMEs, plans, comments) English; UI copy Chinese (quoted as-is
-   in the docs); Conventional Commits.
+6. Unknown cost is `null` in the API and "未知" / "Unknown" in the UI, never 0.
+7. Code-facing text and docs (design doc, READMEs, plans, comments) English; UI copy follows the deployment's
+   `GLASSDESK_LOCALE` (`zh` default, `en`): backend copy in `backend/src/glassdesk/i18n.py`, frontend copy in
+   `frontend/src/lib/i18n.ts`, both locales key for key (Chinese copy quoted as-is in the docs); Conventional Commits.
 
 ## Commands
 

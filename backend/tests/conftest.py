@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from glassdesk.app import create_app
 from glassdesk.config import Settings
 from glassdesk.db import Deps, make_engine, run_migrations
+from glassdesk.i18n import Locale
 from glassdesk.testing import FakeSteward
 from tests.helpers import P1
 
@@ -42,6 +43,7 @@ def settings() -> Settings:
         steward_review_key="stw_test_review",  # type: ignore[arg-type]
         session_secret="s" * 32,  # type: ignore[arg-type]
         brand_name="Acme",
+        locale="zh",  # pinned: a developer's GLASSDESK_LOCALE must not change what tests see
         _env_file=None,  # type: ignore[call-arg]
     )
 
@@ -74,13 +76,15 @@ async def sessions() -> AsyncIterator[PgSessionStore]:
 def make_app(
     settings: Settings, engine: AsyncEngine, sessions: PgSessionStore
 ) -> Callable[..., FastAPI]:
-    def make(model: object, steward: FakeSteward | None = None) -> FastAPI:
+    def make(
+        model: object, steward: FakeSteward | None = None, *, locale: Locale = "zh"
+    ) -> FastAPI:
         deps = Deps(
             engine=engine,
             model=model,
             sessions=sessions,  # type: ignore[arg-type]
             steward=steward or FakeSteward([P1]),
         )
-        return create_app(settings, deps=deps)
+        return create_app(settings.model_copy(update={"locale": locale}), deps=deps)
 
     return make

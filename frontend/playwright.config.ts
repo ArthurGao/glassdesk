@@ -4,7 +4,8 @@ import { defineConfig } from '@playwright/test'
 // with its own schemas so e2e data never mixes with the app's.
 const backend = [
   'cd ../backend',
-  'export GLASSDESK_DB_SCHEMA=glassdesk_e2e GLASSDESK_AGENT_SCHEMA=lite_agent_e2e GLASSDESK_STATIC_DIR=../frontend/dist',
+  // the specs read the zh copy, whatever locale a developer's backend/.env sets
+  'export GLASSDESK_LOCALE=zh GLASSDESK_DB_SCHEMA=glassdesk_e2e GLASSDESK_AGENT_SCHEMA=lite_agent_e2e GLASSDESK_STATIC_DIR=../frontend/dist',
   'uv run glassdesk migrate',
   "(printf 'e2e-password\\n' | uv run glassdesk user create e2e-admin --role admin --password-stdin || true)",
   'uv run glassdesk serve --fake --port 8743',

@@ -912,6 +912,14 @@
             "type": "string",
             "title": "Name"
           },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "zh",
+              "en"
+            ],
+            "title": "Locale"
+          },
           "color": {
             "type": "string",
             "title": "Color"
@@ -931,6 +939,7 @@
         "type": "object",
         "required": [
           "name",
+          "locale",
           "color",
           "welcome",
           "examples"

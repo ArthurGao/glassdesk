@@ -18,6 +18,7 @@ def test_branding_is_public_and_comes_from_settings(settings: Settings, deps: De
     assert response.status_code == 200  # no login: the login page shows it
     assert response.json() == {
         "name": "Acme 知识台",
+        "locale": "zh",
         "color": "#0f766e",
         "welcome": "问我公司制度、流程和常见问题。",
         "examples": ["出差住宿上限是多少？", "年假怎么请？"],

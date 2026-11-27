@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node'
 
 export const BRANDING = {
   name: 'Acme 知识台',
+  locale: 'zh' as const,
   color: '#0f766e',
   welcome: '问我公司制度、流程和常见问题。',
   examples: ['出差住宿上限是多少？', '年假怎么请？'],

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel
 
+from glassdesk.i18n import texts_for
 from glassdesk.users import Role, User, authenticate, end_sessions, get_user
 
 COOKIE = "glassdesk_session"
@@ -46,9 +47,9 @@ async def current_user(request: Request) -> User:
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
-async def reviewer(user: CurrentUser) -> User:
+async def reviewer(request: Request, user: CurrentUser) -> User:
     if user.role not in ("reviewer", "admin"):
-        raise HTTPException(403, "需要审核权限")
+        raise HTTPException(403, texts_for(request).needs_reviewer)
     return user
 
 
@@ -61,7 +62,7 @@ router = APIRouter(prefix="/api")
 async def login(body: LoginIn, request: Request, response: Response) -> MeOut:
     user = await authenticate(request.app.state.deps.engine, body.username, body.password)
     if user is None:
-        raise HTTPException(401, "用户名或密码错误")
+        raise HTTPException(401, texts_for(request).wrong_login)
     response.set_cookie(
         COOKIE,
         _serializer(request).dumps([str(user.id), user.session_version]),

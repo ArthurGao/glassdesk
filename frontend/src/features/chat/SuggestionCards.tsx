@@ -3,11 +3,13 @@ import { useState } from 'react'
 import { acceptCard, listCards, rejectCard } from '@/client/sdk.gen'
 import type { CardOut } from '@/client/types.gen'
 import { isSettled } from '@/lib/api'
+import { useT } from '@/lib/i18n'
 import { chatKeys } from './keys'
 
 /** steward's open confirmation cards for this user: keep for the team, for me, or not at all. */
 export function SuggestionCards() {
   const queryClient = useQueryClient()
+  const t = useT()
   const cards = useQuery({
     queryKey: chatKeys.suggestions,
     queryFn: async () => (await listCards({ throwOnError: true })).data,
@@ -27,7 +29,7 @@ export function SuggestionCards() {
         prev.filter((c) => c.id !== card.id),
       )
     } else {
-      setError('操作失败，请稍后再试')
+      setError(t.actionFailed)
     }
   }
 
@@ -42,23 +44,23 @@ export function SuggestionCards() {
       {cards.data.map((card) => (
         <section
           key={card.id}
-          aria-label="要不要存进知识库？"
+          aria-label={t.chat.cardQuestion}
           className="rounded border border-amber-300 bg-amber-50 p-3 text-sm"
         >
-          <p className="font-medium">要不要存进知识库？</p>
+          <p className="font-medium">{t.chat.cardQuestion}</p>
           <p className="mt-1">
             <span className="font-medium">{card.title}</span>
-            {card.content !== card.title && <span className="text-slate-700">：{card.content}</span>}
+            {card.content !== card.title && <span className="text-slate-700">{t.chat.cardSeparator}{card.content}</span>}
           </p>
           <div className="mt-2 flex gap-2">
             <button type="button" onClick={() => decide(card, 'team')} className="rounded bg-slate-900 px-2 py-1 text-white">
-              存为团队知识
+              {t.chat.keepForTeam}
             </button>
             <button type="button" onClick={() => decide(card, 'personal')} className="rounded border border-slate-300 px-2 py-1">
-              只给我
+              {t.chat.keepForMe}
             </button>
             <button type="button" onClick={() => decide(card, 'reject')} className="rounded px-2 py-1 text-slate-500">
-              不要
+              {t.chat.discard}
             </button>
           </div>
         </section>

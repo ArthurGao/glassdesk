@@ -214,6 +214,12 @@ will be added later as customers need them.
   moved into the database or the event log (a run without `run_finished` is still running).
 - Demo data: `glassdesk seed --demo` writes the documents and entries of a fictional company (clearly marked as demo
   data), which can be cleared after the demo.
+- **UI language** (2026-11-27): one setting per deployment, `GLASSDESK_LOCALE` = `zh` (default) or `en`. It sets every
+  page (the SPA reads it from `/api/branding` and renders nothing until it is known, so an en deployment never
+  flashes Chinese), the agent's system prompt and tool descriptions, the timeline's step titles, HTTP error details,
+  a new conversation's title and the demo seed. The timeline recognises tool results written in either locale,
+  because event logs outlive a switch. The agent still answers in the language of the question. Stored content
+  (KB entries, past answers, conversation titles) is not translated. No per-user language and no switcher in v1.
 
 ## 9. Tests
 
@@ -362,3 +368,23 @@ flow in a browser, and found and fixed:
   saving), switching the whole site to `useMutation` (beyond this change's scope). The root cause is in steward ("a key
   with review is treated as reviewed for its own writes"): later an explicit "skip review" switch can be added in
   steward, and glassdesk can then go back to one key.
+
+### UI language (2026-11-27, branch `feat/locale`)
+
+The owner asked for an English UI and chose a per-deployment setting over replacing the Chinese copy.
+`GLASSDESK_LOCALE` (`zh` | `en`, §8); zh keeps the copy glassdesk shipped with, byte for byte, so every existing test
+and deployment is unchanged. Backend copy lives in `i18n.py` (`Texts`, one instance per locale; the tools' argument
+models are subclassed per locale so the model sees field descriptions in the prompt's language), and frontend copy
+in `lib/i18n.ts` (`en` is typed against `zh`, so a missing key fails `tsc`; components read it through
+`MessagesContext`, which the root route provides). `lib/labels.ts` folded into the dictionaries. The CLI's password
+prompt became English like the rest of the CLI (operator text, not UI).
+- steward's review gate is a keyword list (`deploy/steward-ns.yaml`): it was Chinese only, so an en deployment's
+  pricing / policy / legal content went live unreviewed (the en demo's "Product pricing (needs review)" did). The list
+  now holds English words too, matched case-insensitively as steward does; `FakeSteward` mirrors it.
+- `<html lang>` follows the locale (`zh-CN` as `index.html` ships it, `en`); Playwright pins `GLASSDESK_LOCALE=zh`
+  and the pytest `settings` fixture pins `locale="zh"`, so a developer's `.env` cannot change what the suites see.
+- Close-out: simplify (one argument-model factory for every locale, limits declared once; branding prefetched beside
+  the session check; dead aliases removed). Codex quota was out (until 2026-12-18), so a Claude subagent reviewed
+  instead. Not done: `texts` stays an optional `ZH` default (making it required means rewriting existing tests' calls;
+  every production caller passes it); timeline steps still carry backend-written text rather than structured facts
+  (an API change beyond this one); the `--fake` demo model and fixed passages stay Chinese (e2e scaffolding, run in zh).

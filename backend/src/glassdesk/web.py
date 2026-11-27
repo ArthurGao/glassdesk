@@ -8,13 +8,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from glassdesk.db import Deps
+from glassdesk.i18n import texts_for
 from glassdesk.steward import Decision, StewardPort, StewardRejected, StewardUnavailable
 
 
 def _steward(request: Request) -> StewardPort:
     deps: Deps = request.app.state.deps
     if deps.steward is None:
-        raise HTTPException(503, "知识库未配置")
+        raise HTTPException(503, texts_for(request).kb_not_configured)
     return deps.steward
 
 
@@ -37,9 +38,9 @@ def register_steward_errors(app: FastAPI) -> None:
 
     @app.exception_handler(StewardRejected)
     async def rejected(request: Request, exc: StewardRejected) -> JSONResponse:
-        detail = "已处理" if exc.status == 409 else exc.message
+        detail = texts_for(request).already_decided if exc.status == 409 else exc.message
         return JSONResponse({"detail": detail}, status_code=exc.status)
 
     @app.exception_handler(StewardUnavailable)
     async def unavailable(request: Request, exc: StewardUnavailable) -> JSONResponse:
-        return JSONResponse({"detail": "知识库暂时不可用"}, status_code=503)
+        return JSONResponse({"detail": texts_for(request).kb_unavailable}, status_code=503)

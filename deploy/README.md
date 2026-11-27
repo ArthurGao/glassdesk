@@ -18,7 +18,7 @@ services are only on compose's internal network.
 
 ```bash
 git clone https://github.com/ArthurGao/glassdesk.git && cd glassdesk/deploy
-cp .env.example .env          # change the customer name, colour, welcome text, sample questions, time zone
+cp .env.example .env          # change the UI language (LOCALE), customer name, colour, welcome text, sample questions, time zone
 ./bootstrap.sh                # brings its own Ollama, downloads about 6 GB of models
 # the machine already has Ollama with these two models: USE_HOST_OLLAMA=1 ./bootstrap.sh
 # for demos: DEMO=1 ./bootstrap.sh (writes the knowledge of a fictional company, all titles carry "[演示]" (demo))

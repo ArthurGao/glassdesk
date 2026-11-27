@@ -17,6 +17,7 @@ from glassdesk import auth, conversations, insights, kb, suggestions
 from glassdesk.agent import ROLE
 from glassdesk.config import Settings
 from glassdesk.db import Deps, make_engine, sync_url
+from glassdesk.i18n import Locale
 from glassdesk.runs import Runs
 from glassdesk.steward import HttpSteward
 from glassdesk.web import register_steward_errors
@@ -24,6 +25,7 @@ from glassdesk.web import register_steward_errors
 
 class Branding(BaseModel):
     name: str
+    locale: Locale
     color: str
     welcome: str
     examples: list[str]
@@ -81,6 +83,7 @@ def create_app(settings: Settings, *, deps: Deps | None = None) -> FastAPI:
         """Public: the login page shows it too."""
         return Branding(
             name=settings.brand_name,
+            locale=settings.locale,
             color=settings.brand_color,
             welcome=settings.brand_welcome,
             examples=settings.brand_examples,

@@ -1,5 +1,6 @@
 import { type FormEvent, type KeyboardEvent, useRef, useState } from 'react'
 import { ask } from '@/client/sdk.gen'
+import { useT } from '@/lib/i18n'
 
 export function Composer({
   conversationId,
@@ -12,6 +13,7 @@ export function Composer({
   onAsked: (text: string) => void
   initialText?: string
 }) {
+  const t = useT()
   const [text, setText] = useState(initialText)
   const [error, setError] = useState<string | null>(null)
   // the POST itself, before the stream (`busy`) starts: a ref, so a second Enter in the same
@@ -37,9 +39,9 @@ export function Composer({
       setText('')
       onAsked(question)
     } else if (response?.status === 409) {
-      setError('上一个问题还在处理中')
+      setError(t.chat.busy)
     } else {
-      setError('发送失败，请稍后再试')
+      setError(t.chat.sendFailed)
     }
   }
 
@@ -60,20 +62,20 @@ export function Composer({
       )}
       <div className="flex gap-2">
         <textarea
-          aria-label="问题"
+          aria-label={t.chat.question}
           className="min-h-10 flex-1 resize-none rounded border border-slate-300 px-2 py-1 text-sm"
           value={text}
           maxLength={4000}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="输入问题…（Enter 发送，Shift+Enter 换行）"
+          placeholder={t.chat.placeholder}
         />
         <button
           type="submit"
           disabled={busy || sendingNow || !text.trim()}
           className="rounded bg-slate-900 px-4 text-sm text-white disabled:opacity-50"
         >
-          发送
+          {t.chat.send}
         </button>
       </div>
     </form>
