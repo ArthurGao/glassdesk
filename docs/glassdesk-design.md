@@ -133,6 +133,10 @@ One agent (`desk`), with a role such as `desk.answer` (the concrete model is in 
 | `propose_knowledge(title, content, reason)` | steward `suggest` | Generates a candidate that follows steward's risk policy (automatic / ask the user / review); the agent cannot write an entry that takes effect directly |
 | `get_entry(entry_id)` | steward `entry_get` | Reads the full text of one entry (used when a citation is expanded) |
 
+What the user said about themselves earlier in the same conversation (history, preferences, situation) may be
+used directly, said to come from the conversation and never given a citation number; company knowledge still comes
+only from search results (owner, 2026-11-27: answers ignored a fact stated two messages earlier).
+
 When each conversation turn ends, the backend hands that turn's messages to steward `episode_add` (`mode=sync`;
 steward extracts memory, scores the KB value and generates candidates) and pushes the returned `suggestions[]` to the
 frontend to show cards. The user's decision on a card calls `candidate_accept` / `candidate_reject`. (`mode=sync`
