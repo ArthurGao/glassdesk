@@ -38,7 +38,7 @@ default-groups = ["dev"]
 
 [tool.uv.sources]
 lite-agent = { url = "https://github.com/ArthurGao/lite-agent/releases/download/v0.3.1/lite_agent-0.3.1-py3-none-any.whl" }
-llm-steward-client = { git = "https://github.com/ArthurGao/llm-steward", rev = "53c45e5f84e02ca68aac2d56d940d639758da709", subdirectory = "sdk/python" }
+llm-steward-client = { git = "https://github.com/ArthurGao/llm-steward", rev = "7e5ce050ba6d63f3f10afdced0c5d098cdfd6181", subdirectory = "sdk/python" }
 
 [build-system]
 requires = ["uv_build>=0.10,<0.11"]
